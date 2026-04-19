@@ -153,14 +153,38 @@ end
 function M.fold_search()
   local bufnr = vim.api.nvim_get_current_buf()
 
+  local function with_pattern(opts, fn)
+    local pattern = opts.last_query
+    if not pattern or pattern == '' then return end
+    vim.schedule(function() fn(pattern) end)
+  end
+
   require('fzf-lua').lgrep_curbuf({
     query = vim.fn.getreg('/'),
     actions = {
       ['enter'] = function(_, opts)
-        local pattern = opts.last_query
-        if not pattern or pattern == '' then return end
-        vim.schedule(function()
+        with_pattern(opts, function(pattern)
           do_fold(bufnr, pattern)
+        end)
+      end,
+      ['ctrl-m'] = function(_, opts)
+        with_pattern(opts, function(pattern)
+          local lines, matched, _ = compute_matches(bufnr, pattern, config.context)
+          local result = {}
+          for i, line in ipairs(lines) do
+            if matched[i] then table.insert(result, line) end
+          end
+          open_result_buf(result, 'foldsearch://matched')
+        end)
+      end,
+      ['ctrl-o'] = function(_, opts)
+        with_pattern(opts, function(pattern)
+          local lines, _, visible = compute_matches(bufnr, pattern, config.context)
+          local result = {}
+          for i, line in ipairs(lines) do
+            if visible[i] then table.insert(result, line) end
+          end
+          open_result_buf(result, 'foldsearch://visible')
         end)
       end,
     },
