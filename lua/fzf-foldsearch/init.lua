@@ -249,21 +249,21 @@ end
 function M.setup(opts)
   opts = opts or {}
   config = vim.tbl_deep_extend('force', config, opts)
-  local viewer = require('fzf-foldsearch.viewer')
-  if opts.viewer then
-    viewer.setup(opts.viewer)
+  local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
+  if opts.fuzzlogg then
+    fuzzlogg.setup(opts.fuzzlogg)
   end
 end
 
-local viewer = require('fzf-foldsearch.viewer')
-M.viewer_open = viewer.viewer_open
-M.viewer_add = viewer.viewer_add
-M.viewer_remove = viewer.viewer_remove
-M.viewer_clear = viewer.viewer_clear
-M.viewer_close = viewer.viewer_close
-M.viewer_context_add = viewer.viewer_context_add
-M.viewer_list = viewer.viewer_list
-M.jump_to_source = viewer.jump_to_source
-M.jump_to_result = viewer.jump_to_result
+local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
+M.fuzzlogg_open = fuzzlogg.fuzzlogg_open
+M.fuzzlogg_add = fuzzlogg.fuzzlogg_add
+M.fuzzlogg_remove = fuzzlogg.fuzzlogg_remove
+M.fuzzlogg_clear = fuzzlogg.fuzzlogg_clear
+M.fuzzlogg_close = fuzzlogg.fuzzlogg_close
+M.fuzzlogg_context_add = fuzzlogg.fuzzlogg_context_add
+M.fuzzlogg_list = fuzzlogg.fuzzlogg_list
+M.fuzzlogg_jump_to_source = fuzzlogg.fuzzlogg_jump_to_source
+M.fuzzlogg_jump_to_result = fuzzlogg.fuzzlogg_jump_to_result
 
 return M
