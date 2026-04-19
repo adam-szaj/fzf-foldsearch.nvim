@@ -247,7 +247,23 @@ function M.fold_context_add(n)
 end
 
 function M.setup(opts)
-  config = vim.tbl_deep_extend('force', config, opts or {})
+  opts = opts or {}
+  config = vim.tbl_deep_extend('force', config, opts)
+  local viewer = require('fzf-foldsearch.viewer')
+  if opts.viewer then
+    viewer.setup(opts.viewer)
+  end
 end
+
+local viewer = require('fzf-foldsearch.viewer')
+M.viewer_open = viewer.viewer_open
+M.viewer_add = viewer.viewer_add
+M.viewer_remove = viewer.viewer_remove
+M.viewer_clear = viewer.viewer_clear
+M.viewer_close = viewer.viewer_close
+M.viewer_context_add = viewer.viewer_context_add
+M.viewer_list = viewer.viewer_list
+M.jump_to_source = viewer.jump_to_source
+M.jump_to_result = viewer.jump_to_result
 
 return M
