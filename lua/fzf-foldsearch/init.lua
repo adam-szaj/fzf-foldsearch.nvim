@@ -94,15 +94,14 @@ local function apply_folds(bufnr, pattern, context)
   end
 end
 
-local function open_result_buf(lines, source_name)
+local function open_result_buf(lines, name)
   vim.cmd('new')
   local bufnr = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-  vim.bo[bufnr].buftype = 'nofile'
-  vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].modifiable = false
-  vim.api.nvim_buf_set_name(bufnr, source_name)
+  if name then
+    vim.api.nvim_buf_set_name(bufnr, name)
+  end
 end
 
 function M.extract_matched()
@@ -150,8 +149,24 @@ local function do_fold(bufnr, pattern)
   state.active = true
 end
 
+local function ensure_file(bufnr)
+  local filename = vim.api.nvim_buf_get_name(bufnr)
+  if filename ~= '' and vim.uv.fs_stat(filename) then
+    return
+  end
+  filename = vim.fn.tempname() .. '.log'
+  vim.api.nvim_buf_set_name(bufnr, filename)
+  vim.cmd('silent write')
+  vim.api.nvim_create_autocmd('BufDelete', {
+    buffer = bufnr,
+    once = true,
+    callback = function() vim.fn.delete(filename) end,
+  })
+end
+
 function M.fold_search()
   local bufnr = vim.api.nvim_get_current_buf()
+  ensure_file(bufnr)
 
   local function with_pattern(opts, fn)
     local pattern = opts.last_query
