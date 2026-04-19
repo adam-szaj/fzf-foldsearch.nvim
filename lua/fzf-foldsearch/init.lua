@@ -154,6 +154,7 @@ function M.fold_search()
   local bufnr = vim.api.nvim_get_current_buf()
 
   require('fzf-lua').lgrep_curbuf({
+    query = vim.fn.getreg('/'),
     actions = {
       ['enter'] = function(_, opts)
         local pattern = opts.last_query
