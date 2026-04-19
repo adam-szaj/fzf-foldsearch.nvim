@@ -46,7 +46,7 @@ local function save_view(bufnr)
   vim.fn.writefile(lines, state.viewfile, 'S')
 end
 
-local function apply_folds(bufnr, pattern, context)
+local function compute_matches(bufnr, pattern, context)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local total = #lines
   local re = vim.regex(pattern)
@@ -58,7 +58,6 @@ local function apply_folds(bufnr, pattern, context)
     end
   end
 
-  -- mark lines that should be visible (matched + context)
   local visible = {}
   for i = 1, total do
     if matched[i] then
@@ -68,10 +67,16 @@ local function apply_folds(bufnr, pattern, context)
     end
   end
 
+  return lines, matched, visible
+end
+
+local function apply_folds(bufnr, pattern, context)
+  local lines, matched, visible = compute_matches(bufnr, pattern, context)
+  local total = #lines
+
   vim.cmd('setlocal foldmethod=manual foldminlines=0 foldenable')
   vim.cmd('normal! zE')
 
-  -- fold contiguous invisible ranges
   local fold_start = nil
   for i = 1, total + 1 do
     if i <= total and not visible[i] then
@@ -87,6 +92,51 @@ local function apply_folds(bufnr, pattern, context)
   if not next(matched) then
     vim.notify('fzf-foldsearch: pattern not found', vim.log.levels.WARN)
   end
+end
+
+local function open_result_buf(lines, source_name)
+  vim.cmd('new')
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].buftype = 'nofile'
+  vim.bo[bufnr].bufhidden = 'wipe'
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].modifiable = false
+  vim.api.nvim_buf_set_name(bufnr, source_name)
+end
+
+function M.extract_matched()
+  if not state.active or not state.pattern or not state.bufnr then
+    vim.notify('fzf-foldsearch: no active fold search', vim.log.levels.WARN)
+    return
+  end
+
+  local lines, matched, _ = compute_matches(state.bufnr, state.pattern, state.context)
+  local result = {}
+  for i, line in ipairs(lines) do
+    if matched[i] then
+      table.insert(result, line)
+    end
+  end
+
+  open_result_buf(result, 'foldsearch://matched')
+end
+
+function M.extract_visible()
+  if not state.active or not state.pattern or not state.bufnr then
+    vim.notify('fzf-foldsearch: no active fold search', vim.log.levels.WARN)
+    return
+  end
+
+  local lines, _, visible = compute_matches(state.bufnr, state.pattern, state.context)
+  local result = {}
+  for i, line in ipairs(lines) do
+    if visible[i] then
+      table.insert(result, line)
+    end
+  end
+
+  open_result_buf(result, 'foldsearch://visible')
 end
 
 local function do_fold(bufnr, pattern)
