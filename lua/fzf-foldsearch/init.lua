@@ -3,7 +3,8 @@ local M = {}
 local config = {
   context = 0,
   large_file_mb = 50,
-  result_open = 'new',  -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
+  result_open = 'new',     -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
+  max_result_bufs = 5,     -- max buforów wyników w pamięci; 0 = bez limitu
 }
 
 local state = {
@@ -12,6 +13,7 @@ local state = {
   viewfile = nil,
   active = false,
   bufnr = nil,
+  result_bufs = {},
 }
 
 local function disable_heavy_features(bufnr)
@@ -100,9 +102,21 @@ local function open_result_buf(lines, name)
   vim.cmd(config.result_open)
   local bufnr = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].buftype = 'nofile'
+  vim.bo[bufnr].bufhidden = 'hide'
   vim.bo[bufnr].swapfile = false
   if unique_name then
     pcall(vim.api.nvim_buf_set_name, bufnr, unique_name)
+  end
+
+  table.insert(state.result_bufs, bufnr)
+  if config.max_result_bufs > 0 then
+    while #state.result_bufs > config.max_result_bufs do
+      local old = table.remove(state.result_bufs, 1)
+      if vim.api.nvim_buf_is_valid(old) then
+        vim.cmd('bwipe ' .. old)
+      end
+    end
   end
 end
 
