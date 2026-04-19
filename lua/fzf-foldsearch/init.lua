@@ -3,6 +3,7 @@ local M = {}
 local config = {
   context = 0,
   large_file_mb = 50,
+  result_open = 'new',  -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
 }
 
 local state = {
@@ -95,12 +96,13 @@ local function apply_folds(bufnr, pattern, context)
 end
 
 local function open_result_buf(lines, name)
-  vim.cmd('new')
+  local unique_name = name and (name .. ':' .. os.time()) or nil
+  vim.cmd(config.result_open)
   local bufnr = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].swapfile = false
-  if name then
-    vim.api.nvim_buf_set_name(bufnr, name)
+  if unique_name then
+    pcall(vim.api.nvim_buf_set_name, bufnr, unique_name)
   end
 end
 
@@ -182,7 +184,7 @@ function M.fold_search()
           do_fold(bufnr, pattern)
         end)
       end,
-      ['ctrl-m'] = function(_, opts)
+      ['ctrl-x'] = function(_, opts)
         with_pattern(opts, function(pattern)
           local lines, matched, _ = compute_matches(bufnr, pattern, config.context)
           local result = {}
