@@ -11,6 +11,8 @@ local config = {
   },
 }
 
+local ns_linenum = vim.api.nvim_create_namespace('fuzzlogg_linenum')
+
 local state = {
   active = false,
   src_bufnr = nil,
@@ -148,6 +150,16 @@ local function render()
       local p = state.patterns[pat_idx]
       vim.api.nvim_buf_add_highlight(state.src_bufnr, p.ns_id, p.hl_group, src_i - 1, 0, -1)
     end
+  end
+
+  vim.api.nvim_buf_clear_namespace(state.res_bufnr, ns_linenum, 0, -1)
+  local total = vim.api.nvim_buf_line_count(state.src_bufnr)
+  local width = #tostring(total)
+  for res_i, src_i in pairs(line_map) do
+    vim.api.nvim_buf_set_extmark(state.res_bufnr, ns_linenum, res_i - 1, 0, {
+      virt_text = { { string.format('%' .. width .. 'd │ ', src_i), 'LineNr' } },
+      virt_text_pos = 'inline',
+    })
   end
 end
 
