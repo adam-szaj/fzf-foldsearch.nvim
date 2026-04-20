@@ -57,3 +57,15 @@ end, { desc = 'Jump from source to corresponding FuzzLogg result line' })
 vim.api.nvim_create_user_command('FuzzLoggJumpToSource', function()
   require('fzf-foldsearch').fuzzlogg_jump_to_source()
 end, { desc = 'Jump from FuzzLogg result to source line' })
+
+vim.api.nvim_create_user_command('FuzzLoggSave', function(args)
+  require('fzf-foldsearch').fuzzlogg_save(args.args ~= '' and args.args or nil)
+end, { nargs = '?', desc = 'Save current FuzzLogg session as composition' })
+
+vim.api.nvim_create_user_command('FuzzLoggLoad', function(args)
+  require('fzf-foldsearch').fuzzlogg_load(args.args)
+end, { nargs = 1, desc = 'Load composition or RPN expression into FuzzLogg' })
+
+vim.api.nvim_create_user_command('FuzzLoggPanel', function()
+  require('fzf-foldsearch').fuzzlogg_panel()
+end, { desc = 'Open FuzzLogg panel (patterns & compositions)' })

@@ -265,5 +265,11 @@ M.fuzzlogg_context_add = fuzzlogg.fuzzlogg_context_add
 M.fuzzlogg_list = fuzzlogg.fuzzlogg_list
 M.fuzzlogg_jump_to_source = fuzzlogg.fuzzlogg_jump_to_source
 M.fuzzlogg_jump_to_result = fuzzlogg.fuzzlogg_jump_to_result
+M.fuzzlogg_save = fuzzlogg.fuzzlogg_save
+M.fuzzlogg_load = fuzzlogg.fuzzlogg_load
+
+local panel = require('fzf-foldsearch.panel')
+M.fuzzlogg_panel = panel.panel_open
+M.fuzzlogg_panel_close = panel.panel_close
 
 return M
