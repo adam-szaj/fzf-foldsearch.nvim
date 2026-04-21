@@ -272,4 +272,7 @@ local panel = require('fzf-foldsearch.panel')
 M.fuzzlogg_panel = panel.panel_open
 M.fuzzlogg_panel_close = panel.panel_close
 
+local importer = require('fzf-foldsearch.importer')
+M.fuzzlogg_import = importer.import
+
 return M

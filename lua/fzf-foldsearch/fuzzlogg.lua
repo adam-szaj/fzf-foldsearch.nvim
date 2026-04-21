@@ -534,6 +534,9 @@ function M.setup(opts)
   if config.color_spec then
     config.colors = require('fzf-foldsearch.colors').generate_colors(config.color_spec)
   end
+  if config.import_path then
+    require('fzf-foldsearch.importer').setup({ import_path = config.import_path })
+  end
 end
 
 return M

@@ -154,6 +154,57 @@ function M.get_composition_expr(name)
   return nil
 end
 
+function M.clear_namespace(ns)
+  local data = load()
+  local kept = {}
+  for _, c in ipairs(data.compositions) do
+    if c.namespace ~= ns then
+      table.insert(kept, c)
+    end
+  end
+  data.compositions = kept
+  save(data)
+end
+
+function M.get_by_namespace(ns)
+  local data = load()
+  local result = {}
+  for _, c in ipairs(data.compositions) do
+    if c.namespace == ns then
+      table.insert(result, c)
+    end
+  end
+  return result
+end
+
+function M.has_namespace(ns)
+  local data = load()
+  for _, c in ipairs(data.compositions) do
+    if c.namespace == ns then return true end
+  end
+  return false
+end
+
+function M.save_namespaced(name, expr, ns)
+  local data = load()
+  for i, c in ipairs(data.compositions) do
+    if c.name == name then
+      data.compositions[i].expr = expr
+      data.compositions[i].created_at = os.time()
+      save(data)
+      return
+    end
+  end
+  table.insert(data.compositions, {
+    name       = name,
+    expr       = expr,
+    pinned     = true,
+    namespace  = ns,
+    created_at = os.time(),
+  })
+  save(data)
+end
+
 function M.setup(opts)
   cfg = vim.tbl_deep_extend('force', cfg, opts or {})
 end

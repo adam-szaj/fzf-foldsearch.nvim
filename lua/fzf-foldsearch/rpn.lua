@@ -51,8 +51,10 @@ function M.parse(expr)
     elseif token:match('^/.*/$') then
       local pattern = token:sub(2, -2)
       table.insert(stack, { type = 'pattern', value = pattern })
-    else
+    elseif token:match('^[%w_%-]+::[%w_%-]+$') or token:match('^[%w_%-]+$') then
       table.insert(stack, { type = 'ref', name = token })
+    else
+      error('RPN: unrecognized token "' .. token .. '"')
     end
   end
 

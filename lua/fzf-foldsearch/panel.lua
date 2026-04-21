@@ -39,10 +39,36 @@ local function render(bufnr)
   if #compositions == 0 then
     table.insert(lines, '  (empty)')
   else
-    for i, c in ipairs(compositions) do
+    -- separate namespaced from anonymous/named
+    local no_ns = {}
+    local by_ns = {}
+    local ns_order = {}
+    for _, c in ipairs(compositions) do
+      if c.namespace then
+        if not by_ns[c.namespace] then
+          by_ns[c.namespace] = {}
+          table.insert(ns_order, c.namespace)
+        end
+        table.insert(by_ns[c.namespace], c)
+      else
+        table.insert(no_ns, c)
+      end
+    end
+
+    for _, c in ipairs(no_ns) do
       local tag = c.pinned and '[pinned]' or '[anon]  '
       local label = c.name or os.date('%Y-%m-%d %H:%M', c.created_at)
       table.insert(lines, string.format('  %s %-24s  %s', tag, label, c.expr))
+    end
+
+    for _, ns in ipairs(ns_order) do
+      table.insert(lines, '')
+      table.insert(lines, '  ' .. ns .. '::')
+      for _, c in ipairs(by_ns[ns]) do
+        local tag = c.pinned and '[pinned]' or '[anon]  '
+        local label = c.name or os.date('%Y-%m-%d %H:%M', c.created_at)
+        table.insert(lines, string.format('  %s %-24s  %s', tag, label, c.expr))
+      end
     end
   end
 

@@ -69,3 +69,7 @@ end, { nargs = 1, desc = 'Load composition or RPN expression into FuzzLogg' })
 vim.api.nvim_create_user_command('FuzzLoggPanel', function()
   require('fzf-foldsearch').fuzzlogg_panel()
 end, { desc = 'Open FuzzLogg panel (patterns & compositions)' })
+
+vim.api.nvim_create_user_command('FuzzLoggImport', function(args)
+  require('fzf-foldsearch.importer').import(vim.fn.expand(args.args))
+end, { nargs = 1, complete = 'file', desc = 'Import .fl file into FuzzLogg store' })
