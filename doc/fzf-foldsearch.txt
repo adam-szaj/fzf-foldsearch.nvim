@@ -1,0 +1,304 @@
+*fzf-foldsearch.txt*   Fast log search and filtering for Neovim
+
+Author: Adam Szaj
+License: MIT
+
+==============================================================================
+CONTENTS                                              *fzf-foldsearch-contents*
+
+  1. Introduction .......................... |fzf-foldsearch-intro|
+  2. FoldSearch ............................ |foldsearch|
+     2.1 Commands .......................... |foldsearch-commands|
+     2.2 Configuration ..................... |foldsearch-config|
+  3. FuzzLogg .............................. |FuzzLogg|
+     3.1 Workflow .......................... |fuzzlogg-workflow|
+     3.2 Commands .......................... |fuzzlogg-commands|
+     3.3 RPN Expressions ................... |fuzzlogg-rpn|
+     3.4 Panel ............................. |fuzzlogg-panel|
+     3.5 Persistence ....................... |fuzzlogg-persistence|
+     3.6 Configuration ..................... |fuzzlogg-config|
+
+==============================================================================
+1. INTRODUCTION                                          *fzf-foldsearch-intro*
+
+fzf-foldsearch.nvim provides two complementary tools for searching and
+filtering large files (designed for log files up to 1 GB):
+
+  - |foldsearch|  — fold away non-matching lines (single pattern)
+  - |FuzzLogg|    — dual-panel live viewer with multiple colored patterns,
+                    set algebra, and persistent compositions
+
+Requires: Neovim 0.10+, fzf-lua
+
+==============================================================================
+2. FOLDSEARCH                                                     *foldsearch*
+
+FoldSearch folds away all lines that do not match a pattern. Uses fzf-lua as
+the pattern picker and Lua/LuaJIT for fast matching.
+
+For files larger than `large_file_mb` (default 50 MB), treesitter and LSP are
+automatically disabled to prevent lag.
+
+The original fold state is saved before applying folds and restored by
+|:FzfFoldEnd|.
+
+------------------------------------------------------------------------------
+2.1 Commands                                             *foldsearch-commands*
+
+                                                              *:FzfFoldSearch*
+:FzfFoldSearch
+    Open fzf-lua picker for the current buffer. Inside the picker:
+      <Enter>   apply folds for the typed/selected pattern
+      <Ctrl-x>  extract matched lines to a new scratch buffer
+      <Ctrl-o>  extract visible lines (matched + context) to a new buffer
+
+    The picker is pre-filled with the last `/` search register.
+
+                                                                *:FzfFoldEnd*
+:FzfFoldEnd
+    End fold search and restore the original fold state.
+
+                                                          *:FzfFoldContextAdd*
+:FzfFoldContextAdd {n}
+    Add {n} lines of context around each match and re-apply folds. {n} may be
+    negative to reduce context. Context is clamped to a minimum of 0.
+
+                                                       *:FzfFoldExtractMatched*
+:FzfFoldExtractMatched
+    Copy lines matching the current pattern into a new scratch buffer.
+
+                                                       *:FzfFoldExtractVisible*
+:FzfFoldExtractVisible
+    Copy all visible lines (matched + context) into a new scratch buffer.
+
+    Result buffers are scratch buffers (buftype=nofile) that do not prompt on
+    quit. Old result buffers are wiped when `max_result_bufs` is exceeded.
+
+------------------------------------------------------------------------------
+2.2 Configuration                                         *foldsearch-config*
+
+Pass options to |fzf-foldsearch.setup()|: >lua
+
+    require('fzf-foldsearch').setup({
+      context        = 0,      -- lines of context around matches
+      large_file_mb  = 50,     -- disable treesitter/LSP above this size (MB)
+      result_open    = 'new',  -- how to open result buffers:
+                               --   'new'    horizontal split
+                               --   'vnew'   vertical split
+                               --   'edit'   same window
+                               --   'tabnew' new tab
+      max_result_bufs = 5,     -- max result buffers kept in memory (0 = unlimited)
+    })
+<
+
+==============================================================================
+3. FUZZLOGG                                                         *FuzzLogg*
+
+FuzzLogg is a dual-panel live viewer for log files. It shows the source buffer
+alongside a filtered results buffer that updates in real time as patterns are
+added or the source is edited.
+
+Features:
+  - Multiple simultaneous patterns, each with its own highlight color
+  - Inclusive patterns (show matching lines) and exclusive (hide matching)
+  - Configurable context lines around matches
+  - Bidirectional line jumping between source and results
+  - Set algebra via RPN expressions (union, intersection, difference, complement)
+  - Persistent pattern history and named/anonymous compositions
+
+------------------------------------------------------------------------------
+3.1 Workflow                                            *fuzzlogg-workflow*
+
+1. Open a log file.
+2. Run |:FuzzLoggOpen| (or `<leader>vo`) — a results panel opens alongside.
+3. Run |:FuzzLoggAdd| (or `<leader>va`) — pick a pattern from history or type
+   a new one. Matched lines appear in the results panel, highlighted.
+4. Add more patterns with |:FuzzLoggAdd| (inclusive) or supply `exclude` to
+   |:FuzzLoggAdd| / use `<leader>vx` to exclude lines.
+5. Press `<Enter>` in the results panel to jump to the source line.
+6. Use `<leader>vj` in the source to jump to the corresponding result.
+7. Save the current pattern set with |:FuzzLoggSave| and reload later from
+   |:FuzzLoggPanel|.
+8. Run |:FuzzLoggClose| when done.
+
+------------------------------------------------------------------------------
+3.2 Commands                                            *fuzzlogg-commands*
+
+                                                              *:FuzzLoggOpen*
+:FuzzLoggOpen
+    Open FuzzLogg for the current buffer. Opens a results panel (layout
+    controlled by `fuzzlogg.layout` in |fuzzlogg-config|).
+
+                                                               *:FuzzLoggAdd*
+:FuzzLoggAdd [include|exclude]
+    Open fzf picker showing pattern history. Type a new pattern or select one
+    from history. With `exclude` the pattern hides matching lines instead of
+    showing them. Default is `include`.
+
+                                                            *:FuzzLoggRemove*
+:FuzzLoggRemove {n}
+    Remove the pattern at index {n} (1-based). See |:FuzzLoggList| for
+    indices.
+
+                                                             *:FuzzLoggClear*
+:FuzzLoggClear
+    Remove all active patterns. The results panel is cleared.
+
+                                                             *:FuzzLoggClose*
+:FuzzLoggClose
+    Close FuzzLogg: removes highlights from the source buffer and closes the
+    results panel.
+
+                                                        *:FuzzLoggContextAdd*
+:FuzzLoggContextAdd {n}
+    Add {n} context lines around matches and re-render. {n} may be negative.
+
+                                                              *:FuzzLoggList*
+:FuzzLoggList
+    Print the list of active patterns with their index, type (+/-), and color.
+
+                                                              *:FuzzLoggSave*
+:FuzzLoggSave [name]
+    Save the current pattern set as a composition named {name}. If {name} is
+    omitted, prompts for a name via |vim.ui.input()|. The composition is
+    stored in |fuzzlogg-persistence| and can be reloaded later.
+
+                                                              *:FuzzLoggLoad*
+:FuzzLoggLoad {name|expr}
+    Load patterns into the active session from either:
+      - a saved composition name, or
+      - a raw RPN expression (see |fuzzlogg-rpn|)
+
+    Example: >
+        :FuzzLoggLoad errors-clean
+        :FuzzLoggLoad /ERROR/ /WARN/ |
+<
+
+                                                             *:FuzzLoggPanel*
+:FuzzLoggPanel
+    Open the FuzzLogg panel. See |fuzzlogg-panel|.
+
+                                                      *:FuzzLoggJumpToResult*
+:FuzzLoggJumpToResult
+    From the source buffer, jump to the corresponding line in the results
+    panel (if one exists for the current line).
+
+                                                      *:FuzzLoggJumpToSource*
+:FuzzLoggJumpToSource
+    From the results panel, jump to the corresponding line in the source
+    buffer. Also bound to `<Enter>` in the results buffer.
+
+------------------------------------------------------------------------------
+3.3 RPN Expressions                                         *fuzzlogg-rpn*
+
+FuzzLogg uses Reverse Polish Notation (postfix) to express set operations over
+lines. Parentheses are allowed for readability but are ignored by the parser.
+
+Atoms ~
+  `/regex/`     set of lines matching the Vim regex
+  `name`        reference to a saved composition (resolved recursively)
+
+Operators ~
+  `|`           union        A | B  →  lines in A or B
+  `&`           intersection A & B  →  lines in both A and B
+  `-`           difference   A - B  →  lines in A but not in B
+  `~`           complement   A ~    →  all lines not in A  (unary, postfix)
+
+Maximum expression depth: 5 levels (including referenced compositions).
+
+Examples: >
+
+    /ERROR/ /WARN/ |
+        Lines matching ERROR or WARN.
+
+    /ERROR/ /WARN/ | /debug/ -
+        Lines matching ERROR or WARN, excluding those that also contain debug.
+
+    /ERROR/ /debug/ ~ &
+        Lines matching ERROR that do not contain debug.
+
+    errors-comp /noise/ ~ &
+        Composition "errors-comp" intersected with the complement of /noise/.
+
+    ( /foo/ /bar/ | ) /baz/ -
+        (foo ∪ bar) ∖ baz  — parentheses ignored, same as: /foo/ /bar/ | /baz/ -
+<
+
+------------------------------------------------------------------------------
+3.4 Panel                                                    *fuzzlogg-panel*
+
+|:FuzzLoggPanel| opens a scratch buffer `fuzzlogg://panel` that lists saved
+patterns and compositions.
+
+Panel layout: >
+
+    # FuzzLogg Panel
+
+    ## Patterns (history)
+      /ERROR/
+      /WARN/
+
+    ## Compositions
+      [pinned] errors-clean    /ERROR/ /WARN/ | /debug/ -
+      [anon]   2026-04-21 09:00  /foo/
+<
+
+Panel keymaps ~
+
+  <Enter>       Load the composition or pattern under the cursor into the
+                active FuzzLogg session.
+  a             Add the pattern under the cursor to the session (inclusive).
+  x             Add the pattern under the cursor to the session (exclusive).
+  p             Toggle pin for the composition under the cursor. Pinned
+                compositions are never auto-deleted.
+  d             Delete the composition under the cursor.
+  r             Rename the composition under the cursor (prompts for new name).
+  s             Save the current FuzzLogg session as a new composition
+                (prompts for a name).
+  q             Close the panel.
+
+------------------------------------------------------------------------------
+3.5 Persistence                                        *fuzzlogg-persistence*
+
+All patterns and compositions are saved to: >
+
+    {stdpath('data')}/fuzzlogg/store.json
+<
+
+Pattern history ~
+    Every pattern added via |:FuzzLoggAdd| is stored (deduplicated, most
+    recent last). The history is shown in the fzf picker when adding patterns.
+
+Named compositions ~
+    Saved with |:FuzzLoggSave| {name}. Stored permanently until explicitly
+    deleted from the panel.
+
+Anonymous compositions ~
+    Auto-saved after every change to the active pattern set. The oldest
+    anonymous composition is deleted when the count exceeds `max_anon`
+    (default 20). Pinned anonymous compositions are never deleted.
+
+------------------------------------------------------------------------------
+3.6 Configuration                                         *fuzzlogg-config*
+
+Pass options under the `fuzzlogg` key in |fzf-foldsearch.setup()|: >lua
+
+    require('fzf-foldsearch').setup({
+      fuzzlogg = {
+        layout      = 'vsplit',   -- results panel layout:
+                                  --   'vsplit'      vertical split (default)
+                                  --   'split'       horizontal split
+                                  --   'same_window' replace current window
+        context     = 0,          -- default context lines around matches
+        debounce_ms = 100,        -- live-update debounce in milliseconds
+        max_patterns = 8,         -- max simultaneous patterns
+        colors = {                -- fg highlight colors for patterns 1-8
+          '#3d59a1', '#2ac3de', '#7aa2f7', '#bb9af7',
+          '#394b70', '#0db9d7', '#9d7cd8', '#2d4f67',
+        },
+      },
+    })
+<
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
