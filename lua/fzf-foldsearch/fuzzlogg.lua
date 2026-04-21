@@ -531,6 +531,9 @@ M._add_pattern_direct = add_pattern
 
 function M.setup(opts)
   config = vim.tbl_deep_extend('force', config, opts or {})
+  if config.color_spec then
+    config.colors = require('fzf-foldsearch.colors').generate_colors(config.color_spec)
+  end
 end
 
 return M
