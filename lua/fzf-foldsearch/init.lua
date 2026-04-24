@@ -52,12 +52,14 @@ end
 local function compute_matches(bufnr, pattern, context)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local total = #lines
-  local re = vim.regex(pattern)
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
 
   local matched = {}
-  for i, line in ipairs(lines) do
-    if re:match_str(line) then
-      matched[i] = true
+  local rg_result = vim.system({ 'rg', '--line-number', '--no-heading', '-e', pattern, filepath }, { text = true }):wait()
+  if rg_result.code == 0 and rg_result.stdout then
+    for line in rg_result.stdout:gmatch('[^\n]+') do
+      local lnum = tonumber(line:match('^(%d+):'))
+      if lnum then matched[lnum] = true end
     end
   end
 
@@ -191,7 +193,8 @@ function M.fold_search()
   end
 
   require('fzf-lua').lgrep_curbuf({
-    query = vim.fn.getreg('/'),
+    query  = vim.fn.getreg('/'),
+    silent = true,
     actions = {
       ['enter'] = function(_, opts)
         with_pattern(opts, function(pattern)
