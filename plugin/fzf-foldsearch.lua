@@ -5,6 +5,10 @@ vim.api.nvim_create_user_command('FzfFoldSearch', function()
   require('fzf-foldsearch').fold_search()
 end, { desc = 'Fzf fold search' })
 
+vim.api.nvim_create_user_command('FzfFoldSearchExpr', function(args)
+  require('fzf-foldsearch').fold_search_expr(args.args)
+end, { nargs = 1, desc = 'Fold search with explicit rg regex pattern' })
+
 vim.api.nvim_create_user_command('FzfFoldEnd', function()
   require('fzf-foldsearch').fold_end()
 end, { desc = 'End fzf fold search' })

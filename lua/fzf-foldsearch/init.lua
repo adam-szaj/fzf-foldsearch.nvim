@@ -3,8 +3,11 @@ local M = {}
 local config = {
   context = 0,
   large_file_mb = 50,
-  result_open = 'new',     -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
-  max_result_bufs = 5,     -- max buforów wyników w pamięci; 0 = bez limitu
+  result_open = 'new',          -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
+  max_result_bufs = 5,          -- max buforów wyników w pamięci; 0 = bez limitu
+  sync_last_search = true,      -- inicjuj fzf query z vim '/' register (vim→ERE)
+  update_last_search = true,    -- ustaw '/' register po zatwierdzeniu wzorca (ERE→vim)
+  save_history = true,          -- zapisuj wzorce do store (historia FuzzLogg)
 }
 
 local state = {
@@ -15,6 +18,21 @@ local state = {
   bufnr = nil,
   result_bufs = {},
 }
+
+local function vim_to_ere(pat)
+  local s = pat:gsub('^\\[vVmM]', '')
+  s = s:gsub('\\.', function(m)
+    local c = m:sub(2)
+    if c == '<' or c == '>' then return '\\b' end
+    if c:match('[%(%)%[%]%{%}%+%?%|%^%$%.]') then return c end
+    return c
+  end)
+  return s
+end
+
+local function ere_to_vim(pat)
+  return '\\v' .. pat:gsub('\\b', '\\<')
+end
 
 local function disable_heavy_features(bufnr)
   local ok, stats = pcall(vim.uv.fs_stat, vim.api.nvim_buf_get_name(bufnr))
@@ -161,6 +179,13 @@ local function do_fold(bufnr, pattern)
   state.context = config.context
   state.bufnr = bufnr
 
+  if config.update_last_search then
+    vim.fn.setreg('/', ere_to_vim(pattern))
+  end
+  if config.save_history then
+    require('fzf-foldsearch.store').add_pattern(pattern)
+  end
+
   disable_heavy_features(bufnr)
   save_view(bufnr)
   apply_folds(bufnr, pattern, state.context)
@@ -192,8 +217,14 @@ function M.fold_search()
     vim.schedule(function() fn(pattern) end)
   end
 
+  local init_query = ''
+  if config.sync_last_search then
+    local last = vim.fn.getreg('/')
+    init_query = last ~= '' and vim_to_ere(last) or ''
+  end
+
   require('fzf-lua').lgrep_curbuf({
-    query  = vim.fn.getreg('/'),
+    query  = init_query,
     silent = true,
     actions = {
       ['enter'] = function(_, opts)
@@ -223,6 +254,16 @@ function M.fold_search()
       end,
     },
   })
+end
+
+function M.fold_search_expr(pattern)
+  if not pattern or pattern == '' then
+    vim.notify('fzf-foldsearch: no pattern given', vim.log.levels.WARN)
+    return
+  end
+  local bufnr = vim.api.nvim_get_current_buf()
+  ensure_file(bufnr)
+  do_fold(bufnr, pattern)
 end
 
 function M.fold_end()
@@ -277,5 +318,8 @@ M.fuzzlogg_panel_close = panel.panel_close
 
 local importer = require('fzf-foldsearch.importer')
 M.fuzzlogg_import = importer.import
+
+M.vim_to_ere = vim_to_ere
+M.ere_to_vim = ere_to_vim
 
 return M
