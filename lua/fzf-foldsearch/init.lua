@@ -23,7 +23,11 @@ local function vim_to_ere(pat)
   local s = pat:gsub('^\\[vVmM]', '')
   s = s:gsub('\\.', function(m)
     local c = m:sub(2)
-    if c == '<' or c == '>' then return '\\b' end
+    if c == '<' then
+        return '\\<'
+    elseif c == '>' then
+        return '\\>'
+    end
     if c:match('[%(%)%[%]%{%}%+%?%|%^%$%.]') then return c end
     return c
   end)
@@ -224,7 +228,7 @@ function M.fold_search()
   end
 
   require('fzf-lua').lgrep_curbuf({
-    query  = init_query,
+    regex  = init_query,
     silent = true,
     actions = {
       ['enter'] = function(_, opts)
