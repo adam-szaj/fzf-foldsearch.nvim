@@ -3,11 +3,11 @@ local M = {}
 local config = {
   context = 0,
   large_file_mb = 50,
-  result_open = 'new',          -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
-  max_result_bufs = 5,          -- max buforów wyników w pamięci; 0 = bez limitu
-  sync_last_search = true,      -- inicjuj fzf query z vim '/' register (vim→ERE)
-  update_last_search = true,    -- ustaw '/' register po zatwierdzeniu wzorca (ERE→vim)
-  save_history = true,          -- zapisuj wzorce do store (historia FuzzLogg)
+  result_open = "new", -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
+  max_result_bufs = 5, -- max buforów wyników w pamięci; 0 = bez limitu
+  sync_last_search = true, -- inicjuj fzf query z vim '/' register (vim→ERE)
+  update_last_search = true, -- ustaw '/' register po zatwierdzeniu wzorca (ERE→vim)
+  save_history = true, -- zapisuj wzorce do store (historia FuzzLogg)
 }
 
 local state = {
@@ -20,68 +20,77 @@ local state = {
 }
 
 local function vim_to_ere(pat)
-  local s = pat:gsub('^\\[vVmM]', '')
-  s = s:gsub('\\.', function(m)
+  local s = pat:gsub("^\\[vVmM]", "")
+  s = s:gsub("\\.", function(m)
     local c = m:sub(2)
-    if c == '<' then
-        return '\\<'
-    elseif c == '>' then
-        return '\\>'
+    if c == "<" then
+      return "\\<"
+    elseif c == ">" then
+      return "\\>"
     end
-    if c:match('[%(%)%[%]%{%}%+%?%|%^%$%.]') then return c end
+    if c:match "[%(%)%[%]%{%}%+%?%|%^%$%.]" then
+      return c
+    end
     return c
   end)
   return s
 end
 
 local function ere_to_vim(pat)
-  return '\\v' .. pat:gsub('\\b', '\\<')
+  return "\\v" .. pat:gsub("\\b", "\\<")
 end
 
 local function disable_heavy_features(bufnr)
-  local ok, stats = pcall(vim.uv.fs_stat, vim.api.nvim_buf_get_name(bufnr))
-  if not ok or not stats then return end
-  if stats.size < config.large_file_mb * 1024 * 1024 then return end
-
-  vim.treesitter.stop(bufnr)
-  for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-    vim.lsp.stop_client(client.id)
-  end
+  -- local ok, stats = pcall(vim.uv.fs_stat, vim.api.nvim_buf_get_name(bufnr))
+  -- if not ok or not stats then return end
+  -- if stats.size < config.large_file_mb * 1024 * 1024 then return end
+  -- vim.treesitter.stop(bufnr)
+  -- for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+  --   vim.lsp.stop_client(client.id)
+  -- end
 end
 
 local function save_view(bufnr)
-  if state.viewfile then return end
+  if state.viewfile then
+    return
+  end
   state.viewfile = vim.fn.tempname()
   local saved_viewoptions = vim.o.viewoptions
-  vim.o.viewoptions = 'folds'
-  vim.cmd('mkview ' .. state.viewfile)
+  vim.o.viewoptions = "folds"
+  vim.cmd("mkview " .. state.viewfile)
   vim.o.viewoptions = saved_viewoptions
 
   local lines = vim.fn.readfile(state.viewfile)
-  table.insert(lines, 1, 'silent! normal! zE')
-  table.insert(lines, 'setlocal fdt=' .. vim.o.foldtext)
+  table.insert(lines, 1, "silent! normal! zE")
+  table.insert(lines, "setlocal fdt=" .. vim.o.foldtext)
   if vim.o.foldenable then
-    table.insert(lines, 'setlocal fen')
+    table.insert(lines, "setlocal fen")
   else
-    table.insert(lines, 'setlocal nofen')
+    table.insert(lines, "setlocal nofen")
   end
   lines = vim.tbl_filter(function(l)
-    return not l:match('^enew') and not l:match('^doautoall')
+    return not l:match "^enew" and not l:match "^doautoall"
   end, lines)
-  vim.fn.writefile(lines, state.viewfile, 'S')
+  vim.fn.writefile(lines, state.viewfile, "S")
 end
 
 local function compute_matches(bufnr, pattern, context)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local total = #lines
-  local filepath = vim.api.nvim_buf_get_name(bufnr)
 
   local matched = {}
-  local rg_result = vim.system({ 'rg', '--line-number', '--no-heading', '-e', pattern, filepath }, { text = true }):wait()
+  local rg_result = vim
+    .system(
+      { "rg", "--line-number", "--no-heading", "-e", pattern },
+      { stderr = false, stdout = true, text = true, stdin = lines }
+    )
+    :wait()
   if rg_result.code == 0 and rg_result.stdout then
-    for line in rg_result.stdout:gmatch('[^\n]+') do
-      local lnum = tonumber(line:match('^(%d+):'))
-      if lnum then matched[lnum] = true end
+    for line in rg_result.stdout:gmatch "[^\n]+" do
+      local lnum = tonumber(line:match "^(%d+):")
+      if lnum then
+        matched[lnum] = true
+      end
     end
   end
 
@@ -101,33 +110,35 @@ local function apply_folds(bufnr, pattern, context)
   local lines, matched, visible = compute_matches(bufnr, pattern, context)
   local total = #lines
 
-  vim.cmd('setlocal foldmethod=manual foldminlines=0 foldenable')
-  vim.cmd('normal! zE')
+  vim.cmd "setlocal foldmethod=manual foldminlines=0 foldenable"
+  vim.cmd "normal! zE"
 
   local fold_start = nil
   for i = 1, total + 1 do
     if i <= total and not visible[i] then
-      if not fold_start then fold_start = i end
+      if not fold_start then
+        fold_start = i
+      end
     else
       if fold_start then
-        vim.cmd(fold_start .. ',' .. (i - 1) .. 'fold')
+        vim.cmd(fold_start .. "," .. (i - 1) .. "fold")
         fold_start = nil
       end
     end
   end
 
   if not next(matched) then
-    vim.notify('fzf-foldsearch: pattern not found', vim.log.levels.WARN)
+    vim.notify("fzf-foldsearch: pattern not found", vim.log.levels.WARN)
   end
 end
 
 local function open_result_buf(lines, name)
-  local unique_name = name and (name .. ':' .. os.time()) or nil
+  local unique_name = name and (name .. ":" .. os.time()) or nil
   vim.cmd(config.result_open)
   local bufnr = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-  vim.bo[bufnr].buftype = 'nofile'
-  vim.bo[bufnr].bufhidden = 'hide'
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "hide"
   vim.bo[bufnr].swapfile = false
   if unique_name then
     pcall(vim.api.nvim_buf_set_name, bufnr, unique_name)
@@ -138,7 +149,7 @@ local function open_result_buf(lines, name)
     while #state.result_bufs > config.max_result_bufs do
       local old = table.remove(state.result_bufs, 1)
       if vim.api.nvim_buf_is_valid(old) then
-        vim.cmd('bwipe ' .. old)
+        vim.cmd("bwipe " .. old)
       end
     end
   end
@@ -146,7 +157,7 @@ end
 
 function M.extract_matched()
   if not state.active or not state.pattern or not state.bufnr then
-    vim.notify('fzf-foldsearch: no active fold search', vim.log.levels.WARN)
+    vim.notify("fzf-foldsearch: no active fold search", vim.log.levels.WARN)
     return
   end
 
@@ -158,12 +169,12 @@ function M.extract_matched()
     end
   end
 
-  open_result_buf(result, 'foldsearch://matched')
+  open_result_buf(result, "foldsearch://matched")
 end
 
 function M.extract_visible()
   if not state.active or not state.pattern or not state.bufnr then
-    vim.notify('fzf-foldsearch: no active fold search', vim.log.levels.WARN)
+    vim.notify("fzf-foldsearch: no active fold search", vim.log.levels.WARN)
     return
   end
 
@@ -175,7 +186,7 @@ function M.extract_visible()
     end
   end
 
-  open_result_buf(result, 'foldsearch://visible')
+  open_result_buf(result, "foldsearch://visible")
 end
 
 local function do_fold(bufnr, pattern)
@@ -184,10 +195,10 @@ local function do_fold(bufnr, pattern)
   state.bufnr = bufnr
 
   if config.update_last_search then
-    vim.fn.setreg('/', ere_to_vim(pattern))
+    vim.fn.setreg("/", ere_to_vim(pattern))
   end
   if config.save_history then
-    require('fzf-foldsearch.store').add_pattern(pattern)
+    require("fzf-foldsearch.store").add_pattern(pattern)
   end
 
   disable_heavy_features(bufnr)
@@ -196,85 +207,85 @@ local function do_fold(bufnr, pattern)
   state.active = true
 end
 
-local function ensure_file(bufnr)
-  local filename = vim.api.nvim_buf_get_name(bufnr)
-  if filename ~= '' and vim.uv.fs_stat(filename) then
-    return
-  end
-  filename = vim.fn.tempname() .. '.log'
-  vim.api.nvim_buf_set_name(bufnr, filename)
-  vim.cmd('silent write')
-  vim.api.nvim_create_autocmd('BufDelete', {
-    buffer = bufnr,
-    once = true,
-    callback = function() vim.fn.delete(filename) end,
-  })
-end
-
 function M.fold_search()
   local bufnr = vim.api.nvim_get_current_buf()
-  ensure_file(bufnr)
 
   local function with_pattern(opts, fn)
     local pattern = opts.last_query
-    if not pattern or pattern == '' then return end
-    vim.schedule(function() fn(pattern) end)
+    if not pattern or pattern == "" then
+      return
+    end
+    vim.schedule(function()
+      fn(pattern)
+    end)
   end
 
-  local init_query = ''
+  local init_query = ""
   if config.sync_last_search then
-    local last = vim.fn.getreg('/')
-    init_query = last ~= '' and vim_to_ere(last) or ''
+    local last = vim.fn.getreg "/"
+    init_query = last ~= "" and vim_to_ere(last) or ""
   end
 
-  require('fzf-lua').lgrep_curbuf({
-    regex  = init_query,
+  local grep_fun = nil
+  if vim.bo.buftype == "nofile" then
+    grep_fun = require"fzf-lua".blines
+  else
+    grep_fun = require"fzf-lua".lgrep_curbuf
+  end
+
+  grep_fun {
+    regex = init_query,
     silent = true,
     actions = {
-      ['enter'] = function(_, opts)
+      ["enter"] = function(_, opts)
         with_pattern(opts, function(pattern)
           do_fold(bufnr, pattern)
         end)
       end,
-      ['ctrl-x'] = function(_, opts)
+      ["ctrl-x"] = function(_, opts)
         with_pattern(opts, function(pattern)
           local lines, matched, _ = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
-            if matched[i] then table.insert(result, line) end
+            if matched[i] then
+              table.insert(result, line)
+            end
           end
-          open_result_buf(result, 'foldsearch://matched')
+          open_result_buf(result, "foldsearch://matched")
         end)
       end,
-      ['ctrl-o'] = function(_, opts)
+      ["ctrl-o"] = function(_, opts)
         with_pattern(opts, function(pattern)
           local lines, _, visible = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
-            if visible[i] then table.insert(result, line) end
+            if visible[i] then
+              table.insert(result, line)
+            end
           end
-          open_result_buf(result, 'foldsearch://visible')
+          open_result_buf(result, "foldsearch://visible")
         end)
       end,
     },
-  })
+  }
 end
 
 function M.fold_search_expr(pattern)
-  if not pattern or pattern == '' then
-    vim.notify('fzf-foldsearch: no pattern given', vim.log.levels.WARN)
+  if not pattern or pattern == "" then
+    vim.notify("fzf-foldsearch: no pattern given", vim.log.levels.WARN)
     return
   end
   local bufnr = vim.api.nvim_get_current_buf()
-  ensure_file(bufnr)
   do_fold(bufnr, pattern)
 end
 
 function M.fold_end()
-  if not state.active then return end
+  if not state.active then
+    return
+  end
 
   if state.viewfile then
-    vim.cmd('silent! source ' .. state.viewfile)
+    vim.cmd("silent! source " .. state.viewfile)
     vim.fn.delete(state.viewfile)
     state.viewfile = nil
   end
@@ -286,7 +297,7 @@ end
 
 function M.fold_context_add(n)
   if not state.active or not state.pattern or not state.bufnr then
-    vim.notify('fzf-foldsearch: no active fold search', vim.log.levels.WARN)
+    vim.notify("fzf-foldsearch: no active fold search", vim.log.levels.WARN)
     return
   end
 
@@ -296,14 +307,14 @@ end
 
 function M.setup(opts)
   opts = opts or {}
-  config = vim.tbl_deep_extend('force', config, opts)
-  local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
+  config = vim.tbl_deep_extend("force", config, opts)
+  local fuzzlogg = require "fzf-foldsearch.fuzzlogg"
   if opts.fuzzlogg then
     fuzzlogg.setup(opts.fuzzlogg)
   end
 end
 
-local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
+local fuzzlogg = require "fzf-foldsearch.fuzzlogg"
 M.fuzzlogg_open = fuzzlogg.fuzzlogg_open
 M.fuzzlogg_add = fuzzlogg.fuzzlogg_add
 M.fuzzlogg_remove = fuzzlogg.fuzzlogg_remove
@@ -316,11 +327,11 @@ M.fuzzlogg_jump_to_result = fuzzlogg.fuzzlogg_jump_to_result
 M.fuzzlogg_save = fuzzlogg.fuzzlogg_save
 M.fuzzlogg_load = fuzzlogg.fuzzlogg_load
 
-local panel = require('fzf-foldsearch.panel')
+local panel = require "fzf-foldsearch.panel"
 M.fuzzlogg_panel = panel.panel_open
 M.fuzzlogg_panel_close = panel.panel_close
 
-local importer = require('fzf-foldsearch.importer')
+local importer = require "fzf-foldsearch.importer"
 M.fuzzlogg_import = importer.import
 
 M.vim_to_ere = vim_to_ere
