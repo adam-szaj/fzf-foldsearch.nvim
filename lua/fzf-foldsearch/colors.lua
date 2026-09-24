@@ -1,6 +1,7 @@
 local M = {}
 
 local function hex_to_rgb(hex)
+  assert(type(hex) == 'string' and hex:match('^#%x%x%x%x%x%x$'), 'color must be a #RRGGBB hex string')
   hex = hex:gsub('^#', '')
   return {
     r = tonumber(hex:sub(1, 2), 16),
@@ -49,9 +50,12 @@ end
 
 -- generate_colors({ { '#rgb1', '#rgb2', qnt }, ... }) -> list of hex colors
 function M.generate_colors(spec)
+  assert(type(spec) == 'table' and #spec > 0, 'color_spec must contain at least one gradient')
   local result = {}
   for _, pair in ipairs(spec) do
+    assert(type(pair) == 'table', 'each color_spec gradient must be a table')
     local c1, c2, qnt = pair[1], pair[2], pair[3]
+    assert(type(qnt) == 'number' and qnt >= 1 and qnt % 1 == 0, 'gradient size must be a positive integer')
     for _, color in ipairs(interpolate(c1, c2, qnt)) do
       table.insert(result, color)
     end

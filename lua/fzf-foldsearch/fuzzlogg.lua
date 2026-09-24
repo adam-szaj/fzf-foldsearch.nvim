@@ -22,6 +22,7 @@ local state = {
   res_bufnr = nil,
   src_win = nil,
   res_win = nil,
+  base = nil,
   patterns = {},
   context = 0,
   line_map = {},
@@ -43,6 +44,7 @@ local function reset_state()
   state.res_bufnr = nil
   state.src_win = nil
   state.res_win = nil
+  state.base = nil
   state.patterns = {}
   state.context = config.context
   state.line_map = {}
@@ -51,71 +53,101 @@ local function reset_state()
   state.autocmds = {}
 end
 
-local function compute_lines(src_lines, patterns, context)
-  if #patterns == 0 then
-    return {}, {}, {}, {}, {}
-  end
+local function active_pattern_count()
+  return #state.patterns + (state.base and #state.base.patterns or 0)
+end
 
-  local matched = {}
-  for i, line in ipairs(src_lines) do
-    matched[i] = {}
-    for j, p in ipairs(patterns) do
-      if p.re:match_str(line) then
-        matched[i][j] = true
-      end
+local function build_filter_tree()
+  local tree = state.base and state.base.tree or nil
+  local excluded = {}
+  for _, pattern in ipairs(state.patterns) do
+    local atom = { type = 'pattern', value = pattern.pattern }
+    if pattern.inclusive then
+      tree = tree and { op = '|', left = tree, right = atom } or atom
+    else
+      table.insert(excluded, atom)
     end
   end
 
-  local visible_by = {}
-  for i = 1, #src_lines do
-    local inc_match = false
-    local exc_match = false
-    local first_pat = nil
-    for j, p in ipairs(patterns) do
-      if matched[i][j] then
-        if p.inclusive then
-          inc_match = true
-          if not first_pat then first_pat = j end
-        else
-          exc_match = true
+  for _, atom in ipairs(excluded) do
+    if tree then
+      tree = { op = '-', left = tree, right = atom }
+    else
+      tree = { type = 'empty' }
+    end
+  end
+  return tree
+end
+
+local function all_patterns()
+  local patterns = {}
+  if state.base then
+    vim.list_extend(patterns, state.base.patterns)
+  end
+  vim.list_extend(patterns, state.patterns)
+  return patterns
+end
+
+local function compute_lines(src_lines, context)
+  local tree = build_filter_tree()
+  if not tree then return {}, {}, {}, {}, {} end
+
+  local patterns = all_patterns()
+  local regex_cache = {}
+  for _, pattern in ipairs(patterns) do
+    regex_cache[pattern.pattern] = pattern.re
+  end
+  local selected = rpn.eval(tree, src_lines, store.get_composition_expr, regex_cache)
+  local highlight_patterns = {}
+  for _, pattern in ipairs(patterns) do
+    if pattern.inclusive then
+      table.insert(highlight_patterns, pattern)
+    end
+  end
+
+  local visible = {}
+  local color_by = {}
+  for i, line in ipairs(src_lines) do
+    if selected[i] then
+      visible[i] = true
+      for idx, pattern in ipairs(highlight_patterns) do
+        if pattern.re:match_str(line) then
+          color_by[i] = idx
+          break
         end
       end
     end
-    if inc_match and not exc_match then
-      visible_by[i] = first_pat
-    end
   end
 
+  local context_color_by = {}
   if context > 0 then
-    local ctx_visible_by = {}
+    local expanded = {}
     for i = 1, #src_lines do
-      if visible_by[i] then
-        local pat_idx = visible_by[i]
+      if visible[i] then
         for c = math.max(1, i - context), math.min(#src_lines, i + context) do
-          if not ctx_visible_by[c] then
-            ctx_visible_by[c] = pat_idx
+          expanded[c] = true
+          if not context_color_by[c] then
+            context_color_by[c] = color_by[i]
           end
         end
       end
     end
-    visible_by = ctx_visible_by
+    visible = expanded
   end
 
   local res_lines = {}
   local line_map = {}
   local src_map = {}
   for i = 1, #src_lines do
-    if visible_by[i] then
+    if visible[i] then
       local res_i = #res_lines + 1
       table.insert(res_lines, src_lines[i])
       line_map[res_i] = i
-      if not src_map[i] then
-        src_map[i] = res_i
-      end
+      src_map[i] = res_i
     end
   end
 
-  return res_lines, line_map, src_map, matched, visible_by
+  return res_lines, line_map, src_map, color_by, context_color_by, highlight_patterns
 end
 
 local function render()
@@ -124,8 +156,8 @@ local function render()
   if not vim.api.nvim_buf_is_valid(state.res_bufnr) then return end
 
   local src_lines = vim.api.nvim_buf_get_lines(state.src_bufnr, 0, -1, false)
-  local res_lines, line_map, src_map, _, visible_by =
-    compute_lines(src_lines, state.patterns, state.context)
+  local res_lines, line_map, src_map, color_by, context_color_by, highlight_patterns =
+    compute_lines(src_lines, state.context)
 
   vim.bo[state.res_bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(state.res_bufnr, 0, -1, false, res_lines)
@@ -134,23 +166,23 @@ local function render()
   state.line_map = line_map
   state.src_map = src_map
 
-  for _, p in ipairs(state.patterns) do
+  for _, p in ipairs(all_patterns()) do
     vim.api.nvim_buf_clear_namespace(state.res_bufnr, p.ns_id, 0, -1)
     vim.api.nvim_buf_clear_namespace(state.src_bufnr, p.ns_id, 0, -1)
   end
 
   for res_i, src_i in pairs(line_map) do
-    local pat_idx = visible_by[src_i]
+    local pat_idx = color_by[src_i] or context_color_by[src_i]
     if pat_idx then
-      local p = state.patterns[pat_idx]
+      local p = highlight_patterns[pat_idx]
       vim.api.nvim_buf_add_highlight(state.res_bufnr, p.ns_id, p.hl_group, res_i - 1, 0, -1)
     end
   end
 
   for src_i, _ in pairs(src_map) do
-    local pat_idx = visible_by[src_i]
+    local pat_idx = color_by[src_i] or context_color_by[src_i]
     if pat_idx then
-      local p = state.patterns[pat_idx]
+      local p = highlight_patterns[pat_idx]
       vim.api.nvim_buf_add_highlight(state.src_bufnr, p.ns_id, p.hl_group, src_i - 1, 0, -1)
     end
   end
@@ -183,12 +215,12 @@ local function open_layout()
     vim.api.nvim_win_set_buf(state.src_win, state.res_bufnr)
     state.res_win = state.src_win
   elseif config.layout == 'split' then
-    vim.cmd('new')
+    vim.cmd('split')
     state.res_win = vim.api.nvim_get_current_win()
     state.res_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(state.res_win, state.res_bufnr)
   else
-    vim.cmd('vnew')
+    vim.cmd('vsplit')
     state.res_win = vim.api.nvim_get_current_win()
     state.res_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(state.res_win, state.res_bufnr)
@@ -233,26 +265,21 @@ local function setup_autocmds()
 end
 
 local function build_expr()
-  local parts = {}
-  for i, p in ipairs(state.patterns) do
-    table.insert(parts, '/' .. p.pattern .. '/')
-    if not p.inclusive then
-      table.insert(parts, '~')
-    end
-    if i > 1 then
-      table.insert(parts, '|')
-    end
-  end
-  return table.concat(parts, ' ')
+  local tree = build_filter_tree()
+  return tree and rpn.serialize(tree) or nil
 end
 
 local function auto_save()
-  if not state.active or #state.patterns == 0 then return end
-  store.save_composition(nil, build_expr())
+  if not state.active then return end
+  store.save_composition(nil, build_expr() or '@empty')
 end
 
 local function add_pattern(pattern, inclusive)
-  if #state.patterns >= config.max_patterns then
+  if not state.active then
+    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
+    return
+  end
+  if active_pattern_count() >= config.max_patterns then
     vim.notify('FuzzLogg: max patterns reached (' .. config.max_patterns .. ')', vim.log.levels.WARN)
     return
   end
@@ -263,10 +290,10 @@ local function add_pattern(pattern, inclusive)
     return
   end
 
-  local idx = #state.patterns + 1
+  local idx = active_pattern_count() + 1
   local color = config.colors[((idx - 1) % #config.colors) + 1]
   local hl_group = 'FuzzLoggPat' .. idx
-  local ns_id = vim.api.nvim_create_namespace('fuzzlogg_' .. idx .. '_' .. os.time())
+  local ns_id = vim.api.nvim_create_namespace('')
 
   vim.api.nvim_set_hl(0, hl_group, { fg = color, bold = true })
 
@@ -286,6 +313,37 @@ local function add_pattern(pattern, inclusive)
 
   schedule_render()
   auto_save()
+end
+
+local function make_base(tree, expr, regex_cache)
+  local pattern_list = {}
+  for i, pattern in ipairs(rpn.collect_patterns(tree)) do
+    local re = regex_cache[pattern]
+    local idx = i
+    local color = config.colors[((idx - 1) % #config.colors) + 1]
+    local hl_group = 'FuzzLoggPat' .. idx
+    vim.api.nvim_set_hl(0, hl_group, { fg = color, bold = true })
+    table.insert(pattern_list, {
+      pattern = pattern,
+      inclusive = true,
+      re = re,
+      ns_id = vim.api.nvim_create_namespace(''),
+      hl_group = hl_group,
+      color = color,
+    })
+  end
+  return { tree = tree, expr = expr, patterns = pattern_list }
+end
+
+local function clear_highlights(patterns)
+  for _, pattern in ipairs(patterns) do
+    if vim.api.nvim_buf_is_valid(state.res_bufnr) then
+      vim.api.nvim_buf_clear_namespace(state.res_bufnr, pattern.ns_id, 0, -1)
+    end
+    if vim.api.nvim_buf_is_valid(state.src_bufnr) then
+      vim.api.nvim_buf_clear_namespace(state.src_bufnr, pattern.ns_id, 0, -1)
+    end
+  end
 end
 
 function M.fuzzlogg_open()
@@ -317,8 +375,10 @@ function M.fuzzlogg_add(inclusive)
     fzf_opts = { ['--print-query'] = '', ['--query'] = vim.fn.getreg('/') },
     actions = {
       ['enter'] = function(selected, opts)
-        local pattern = (selected and selected[1] ~= '' and selected[1])
-          or (opts and opts.last_query)
+        local pattern = selected and selected[#selected]
+        if not pattern or pattern == '' then
+          pattern = opts and opts.last_query
+        end
         if not pattern or pattern == '' then return end
         vim.schedule(function() add_pattern(pattern, inclusive) end)
       end,
@@ -326,12 +386,12 @@ function M.fuzzlogg_add(inclusive)
   })
 end
 
-function M.fuzzlogg_save(name)
+function M.fuzzlogg_save(name, on_saved)
   if not state.active then
     vim.notify('FuzzLogg: not active', vim.log.levels.WARN)
     return
   end
-  if #state.patterns == 0 then
+  if #state.patterns == 0 and not state.base then
     vim.notify('FuzzLogg: no patterns to save', vim.log.levels.WARN)
     return
   end
@@ -339,7 +399,7 @@ function M.fuzzlogg_save(name)
   if not name then
     vim.ui.input({ prompt = 'Save composition as: ' }, function(input)
       if input and input ~= '' then
-        M.fuzzlogg_save(input)
+        M.fuzzlogg_save(input, on_saved)
       end
     end)
     return
@@ -348,6 +408,47 @@ function M.fuzzlogg_save(name)
   local expr = build_expr()
   store.save_composition(name, expr)
   vim.notify('FuzzLogg: saved composition "' .. name .. '"', vim.log.levels.INFO)
+  if on_saved then on_saved() end
+end
+
+local function load_tree(tree)
+  local ok, resolved = pcall(rpn.resolve, tree, store.get_composition_expr)
+  if not ok then
+    vim.notify('FuzzLogg: eval error: ' .. tostring(resolved), vim.log.levels.ERROR)
+    return
+  end
+
+  local leaf_patterns = rpn.collect_patterns(resolved)
+  if #leaf_patterns > config.max_patterns then
+    vim.notify('FuzzLogg: expression exceeds max patterns (' .. config.max_patterns .. ')', vim.log.levels.WARN)
+    return
+  end
+
+  local src_lines = vim.api.nvim_buf_get_lines(state.src_bufnr, 0, -1, false)
+  local regex_cache = {}
+  local ok2, result_set = pcall(rpn.eval, resolved, src_lines, nil, regex_cache)
+  if not ok2 then
+    vim.notify('FuzzLogg: eval error: ' .. tostring(result_set), vim.log.levels.ERROR)
+    return
+  end
+
+  local ok3, base = pcall(make_base, resolved, rpn.serialize(resolved), regex_cache)
+  if not ok3 then
+    vim.notify('FuzzLogg: eval error: ' .. tostring(base), vim.log.levels.ERROR)
+    return
+  end
+
+  clear_highlights(all_patterns())
+  state.base = base
+  state.patterns = {}
+  state.line_map = {}
+  state.src_map = {}
+  schedule_render()
+  auto_save()
+
+  local matches = 0
+  for _ in pairs(result_set) do matches = matches + 1 end
+  vim.notify('FuzzLogg: loaded expression, ' .. matches .. ' lines', vim.log.levels.INFO)
 end
 
 function M.fuzzlogg_load(expr_or_name)
@@ -355,89 +456,53 @@ function M.fuzzlogg_load(expr_or_name)
     vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
     return
   end
-
-  local expr = expr_or_name
-  if not expr:find('/') and not expr:find('[|&~-]') then
-    local found = store.get_composition_expr(expr_or_name)
-    if not found then
-      vim.notify('FuzzLogg: composition "' .. expr_or_name .. '" not found', vim.log.levels.ERROR)
-      return
-    end
-    expr = found
+  if type(expr_or_name) ~= 'string' or expr_or_name == '' then
+    vim.notify('FuzzLogg: no composition or expression given', vim.log.levels.WARN)
+    return
   end
+
+  local expr = store.get_composition_expr(expr_or_name) or expr_or_name
 
   local ok, tree = pcall(rpn.parse, expr)
   if not ok then
     vim.notify('FuzzLogg: parse error: ' .. tostring(tree), vim.log.levels.ERROR)
     return
   end
+  load_tree(tree)
+end
 
-  local src_lines = vim.api.nvim_buf_get_lines(state.src_bufnr, 0, -1, false)
-  local ok2, result_set = pcall(rpn.eval, tree, src_lines, function(name)
-    return store.get_composition_expr(name)
-  end)
-  if not ok2 then
-    vim.notify('FuzzLogg: eval error: ' .. tostring(result_set), vim.log.levels.ERROR)
+function M.fuzzlogg_load_pattern(pattern)
+  if not state.active then
+    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
     return
   end
-
-  for _, p in ipairs(state.patterns) do
-    vim.api.nvim_buf_clear_namespace(state.res_bufnr, p.ns_id, 0, -1)
-    vim.api.nvim_buf_clear_namespace(state.src_bufnr, p.ns_id, 0, -1)
-  end
-  state.patterns = {}
-
-  local leaf_patterns = rpn.collect_patterns(tree)
-  for i, pattern in ipairs(leaf_patterns) do
-    local ok3, re = pcall(vim.regex, pattern)
-    if ok3 then
-      local color = config.colors[((i - 1) % #config.colors) + 1]
-      local hl_group = 'FuzzLoggPat' .. i
-      local ns_id = vim.api.nvim_create_namespace('fuzzlogg_' .. i .. '_' .. os.time())
-      vim.api.nvim_set_hl(0, hl_group, { fg = color, bold = true })
-      table.insert(state.patterns, {
-        pattern = pattern,
-        inclusive = true,
-        re = re,
-        ns_id = ns_id,
-        hl_group = hl_group,
-        color = color,
-      })
-    end
-  end
-
-  state.line_map = {}
-  state.src_map = {}
-  for i, _ in pairs(result_set) do
-    local res_i = #state.line_map + 1
-    state.line_map[res_i] = i
-    if not state.src_map[i] then state.src_map[i] = res_i end
-  end
-
-  local res_lines = {}
-  for res_i = 1, #state.line_map do
-    local src_i = state.line_map[res_i]
-    table.insert(res_lines, src_lines[src_i] or '')
-  end
-
-  vim.bo[state.res_bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(state.res_bufnr, 0, -1, false, res_lines)
-  vim.bo[state.res_bufnr].modifiable = false
-
-  schedule_render()
-  vim.notify('FuzzLogg: loaded expression, ' .. #res_lines .. ' lines', vim.log.levels.INFO)
+  if type(pattern) ~= 'string' or pattern == '' then return end
+  load_tree({ type = 'pattern', value = pattern })
 end
 
 function M.fuzzlogg_remove(idx)
   if not state.active then return end
+  if type(idx) ~= 'number' or idx < 1 or idx % 1 ~= 0 then
+    vim.notify('FuzzLogg: invalid pattern index ' .. tostring(idx), vim.log.levels.WARN)
+    return
+  end
+  if state.base then
+    if idx == 1 then
+      clear_highlights(state.base.patterns)
+      state.base = nil
+      schedule_render()
+      auto_save()
+      return
+    end
+    idx = idx - 1
+  end
   local p = state.patterns[idx]
   if not p then
     vim.notify('FuzzLogg: no pattern at index ' .. tostring(idx), vim.log.levels.WARN)
     return
   end
 
-  vim.api.nvim_buf_clear_namespace(state.res_bufnr, p.ns_id, 0, -1)
-  vim.api.nvim_buf_clear_namespace(state.src_bufnr, p.ns_id, 0, -1)
+  clear_highlights({ p })
   table.remove(state.patterns, idx)
 
   schedule_render()
@@ -446,14 +511,8 @@ end
 
 function M.fuzzlogg_clear()
   if not state.active then return end
-  for _, p in ipairs(state.patterns) do
-    if vim.api.nvim_buf_is_valid(state.res_bufnr) then
-      vim.api.nvim_buf_clear_namespace(state.res_bufnr, p.ns_id, 0, -1)
-    end
-    if vim.api.nvim_buf_is_valid(state.src_bufnr) then
-      vim.api.nvim_buf_clear_namespace(state.src_bufnr, p.ns_id, 0, -1)
-    end
-  end
+  clear_highlights(all_patterns())
+  state.base = nil
   state.patterns = {}
   schedule_render()
   auto_save()
@@ -462,22 +521,22 @@ end
 function M.fuzzlogg_close()
   if not state.active then return end
 
-  for _, p in ipairs(state.patterns) do
-    if vim.api.nvim_buf_is_valid(state.src_bufnr) then
-      vim.api.nvim_buf_clear_namespace(state.src_bufnr, p.ns_id, 0, -1)
-    end
-  end
+  local src_bufnr = state.src_bufnr
+  local src_win = state.src_win
+  local res_bufnr = state.res_bufnr
+  local res_win = state.res_win
+  local same_window = res_win == src_win
+  state.active = false
+  clear_highlights(all_patterns())
 
-  if state.res_win ~= state.src_win then
-    if vim.api.nvim_win_is_valid(state.res_win) then
-      vim.api.nvim_win_close(state.res_win, true)
-    end
-  else
-    if vim.api.nvim_buf_is_valid(state.res_bufnr) then
-      vim.cmd('bwipe ' .. state.res_bufnr)
-    end
+  if same_window and vim.api.nvim_win_is_valid(src_win) and vim.api.nvim_buf_is_valid(src_bufnr) then
+    vim.api.nvim_win_set_buf(src_win, src_bufnr)
+  elseif vim.api.nvim_win_is_valid(res_win) then
+    vim.api.nvim_win_close(res_win, true)
   end
-
+  if vim.api.nvim_buf_is_valid(res_bufnr) then
+    pcall(vim.api.nvim_buf_delete, res_bufnr, { force = true })
+  end
   reset_state()
 end
 
@@ -491,14 +550,19 @@ function M.fuzzlogg_context_add(n)
 end
 
 function M.fuzzlogg_list()
-  if not state.active or #state.patterns == 0 then
+  if not state.active or (#state.patterns == 0 and not state.base) then
     vim.notify('FuzzLogg: no active patterns', vim.log.levels.INFO)
     return
   end
   local lines = {}
+  local index = 1
+  if state.base then
+    table.insert(lines, string.format('[1] = expression %s', state.base.expr))
+    index = 2
+  end
   for i, p in ipairs(state.patterns) do
     local kind = p.inclusive and '+' or '-'
-    table.insert(lines, string.format('[%d] %s %s  (%s)', i, kind, p.pattern, p.color))
+    table.insert(lines, string.format('[%d] %s %s  (%s)', index + i - 1, kind, p.pattern, p.color))
   end
   vim.notify('FuzzLogg patterns:\n' .. table.concat(lines, '\n'), vim.log.levels.INFO)
 end
@@ -509,6 +573,9 @@ function M.fuzzlogg_jump_to_source()
   local res_line = vim.api.nvim_win_get_cursor(state.res_win)[1]
   local src_line = state.line_map[res_line]
   if src_line and vim.api.nvim_win_is_valid(state.src_win) then
+    if state.src_win == state.res_win then
+      vim.api.nvim_win_set_buf(state.src_win, state.src_bufnr)
+    end
     vim.api.nvim_set_current_win(state.src_win)
     vim.api.nvim_win_set_cursor(state.src_win, { src_line, 0 })
     vim.cmd('normal! zz')
@@ -521,6 +588,9 @@ function M.fuzzlogg_jump_to_result()
   local src_line = vim.api.nvim_win_get_cursor(state.src_win)[1]
   local res_line = state.src_map[src_line]
   if res_line and vim.api.nvim_win_is_valid(state.res_win) then
+    if state.src_win == state.res_win then
+      vim.api.nvim_win_set_buf(state.res_win, state.res_bufnr)
+    end
     vim.api.nvim_set_current_win(state.res_win)
     vim.api.nvim_win_set_cursor(state.res_win, { res_line, 0 })
     vim.cmd('normal! zz')
@@ -533,6 +603,26 @@ function M.setup(opts)
   config = vim.tbl_deep_extend('force', config, opts or {})
   if config.color_spec then
     config.colors = require('fzf-foldsearch.colors').generate_colors(config.color_spec)
+  end
+  if config.layout ~= 'vsplit' and config.layout ~= 'split' and config.layout ~= 'same_window' then
+    error('FuzzLogg: layout must be "vsplit", "split", or "same_window"')
+  end
+  if type(config.colors) ~= 'table' or #config.colors == 0 then
+    error('FuzzLogg: colors must contain at least one color')
+  end
+  for _, color in ipairs(config.colors) do
+    if type(color) ~= 'string' or color == '' then
+      error('FuzzLogg: each color must be a non-empty string')
+    end
+  end
+  if type(config.max_patterns) ~= 'number' or config.max_patterns < 1 or config.max_patterns % 1 ~= 0 then
+    error('FuzzLogg: max_patterns must be a positive integer')
+  end
+  if type(config.debounce_ms) ~= 'number' or config.debounce_ms < 0 or config.debounce_ms % 1 ~= 0 then
+    error('FuzzLogg: debounce_ms must be a non-negative integer')
+  end
+  if type(config.context) ~= 'number' or config.context < 0 or config.context % 1 ~= 0 then
+    error('FuzzLogg: context must be a non-negative integer')
   end
   if config.import_path then
     require('fzf-foldsearch.importer').setup({ import_path = config.import_path })

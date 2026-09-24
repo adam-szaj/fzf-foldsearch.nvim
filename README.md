@@ -166,6 +166,8 @@ Press `,va` again. Type `WARN` and press `<Enter>`.
 
 Lines matching `WARN` appear in the results panel highlighted in color 2 (cyan). Both patterns are active simultaneously.
 
+Include patterns combine with OR. If a line matches multiple includes, the first matching include in the active pattern order determines its highlight color.
+
 **Step 4 — Exclude noisy lines**
 
 There's a module called `heartbeat` that logs every second and drowns out real errors.
@@ -179,6 +181,8 @@ Lines containing `heartbeat` disappear from the results — even if they also ma
 The error lines alone don't give enough information. Press `,vi` a few times to show lines around each match.
 
 Each press of `,vi` adds one more line of context above and below each match. `,vd` reduces it. `,vI` / `,vD` change by 5 at a time.
+
+Context is added after include and exclude filtering, so a context line can itself match an exclude pattern.
 
 **Step 6 — Jump between panels**
 
@@ -212,7 +216,7 @@ The list shows your pattern history — patterns you've used before, most recent
 - **Type a new pattern** — just start typing; press `<Enter>` to use what you typed
 - **Filter the history** — type to narrow down the list, then `<Enter>` to select the highlighted item
 
-If you type something that partially matches a historical entry, fzf will highlight it — but pressing `<Enter>` uses whatever you typed, not the highlighted item (unless you navigate to it explicitly with the arrow keys).
+Pressing `<Enter>` uses the highlighted history entry when one is selected. If no entry is selected, it uses the text in the query as a new pattern.
 
 The picker is pre-filled with your last `/` search register.
 
@@ -248,7 +252,9 @@ A **composition** is a saved set of patterns (or a set expression) that you can 
 
 **Anonymous auto-save:**
 
-Every time you add or remove a pattern, FuzzLogg automatically saves an anonymous snapshot. These show up in the panel with a timestamp label. The 20 oldest are kept; older ones are deleted automatically.
+Adding, removing, clearing, or loading a filter saves an anonymous snapshot. These show up in the panel with a timestamp label. The newest 20 unpinned snapshots are kept; older ones are deleted automatically. Context is not stored in compositions.
+
+An empty filter is stored as the RPN atom `@empty`. Plugin versions that predate this atom cannot load snapshots created after clearing the filter.
 
 ### The panel
 
@@ -302,7 +308,7 @@ Expressions use **Reverse Polish Notation (RPN)**: you write the operands first,
 - `/regex/` — a Vim regex pattern, wrapped in slashes
 - `name` — the name of a saved composition (resolved recursively)
 
-Parentheses `( )` are allowed for readability but ignored by the parser.
+Parentheses `( )` are allowed for readability but ignored by the parser. A `/regex/` atom may contain spaces; escape a literal slash as `\/`. `@empty` denotes the empty set.
 
 **Reading RPN:**
 
@@ -342,7 +348,7 @@ then later:
 :FuzzLoggLoad base-errors /verbose/ -
 ```
 
-This loads `base-errors` (resolved from the store) and subtracts lines matching `/verbose/`. You can then save this as a new composition too. Nesting is allowed up to depth 5.
+This loads `base-errors` (resolved from the store) and subtracts lines matching `/verbose/`. You can then save this as a new composition too. Composition references may be nested up to 5 levels; an expression tree may be up to 128 levels deep.
 
 ### Keymaps (suggested)
 
@@ -363,6 +369,8 @@ This loads `base-errors` (resolved from the store) and subtracts lines matching 
 | `<leader>vp` | Open panel |
 | `<Enter>` *(results panel)* | Jump to source line |
 
+These `<leader>v…` mappings are examples only; the plugin registers the commands and panel-local keys, not these global mappings.
+
 ### Commands
 
 | Command | Description |
@@ -379,6 +387,7 @@ This loads `base-errors` (resolved from the store) and subtracts lines matching 
 | `:FuzzLoggPanel` | Open panel |
 | `:FuzzLoggJumpToResult` | Jump from source to result line |
 | `:FuzzLoggJumpToSource` | Jump from result to source line |
+| `:FuzzLoggImport {file}` | Import compositions from a `.fl` file |
 
 ### Persistence
 
@@ -386,7 +395,12 @@ Saved to `{stdpath('data')}/fuzzlogg/store.json`:
 
 - **Pattern history** — all patterns ever used, deduplicated, shown in picker
 - **Named compositions** — saved with `:FuzzLoggSave name`, kept permanently
-- **Anonymous compositions** — auto-saved on every change, oldest deleted when count exceeds 20
+- **Anonymous compositions** — auto-saved after add, remove, clear, and load; newest 20 unpinned snapshots are kept
+
+The importer accepts `.fl` files containing `label: expression` entries. Run
+`:FuzzLoggImport /path/to/name.fl`; the filename stem becomes the composition
+namespace. `#` comments must occupy a whole line so `#` remains available in
+regexes.
 
 ### Configuration
 

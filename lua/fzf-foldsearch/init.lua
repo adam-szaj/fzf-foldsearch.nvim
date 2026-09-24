@@ -5,8 +5,8 @@ local config = {
   large_file_mb = 50,
   result_open = "new", -- 'new' (split), 'edit' (same window), 'vnew' (vsplit), 'tabnew'
   max_result_bufs = 5, -- max buforów wyników w pamięci; 0 = bez limitu
-  sync_last_search = true, -- inicjuj fzf query z vim '/' register (vim→ERE)
-  update_last_search = true, -- ustaw '/' register po zatwierdzeniu wzorca (ERE→vim)
+  sync_last_search = true, -- inicjuj fzf query z vim '/' register
+  update_last_search = true, -- ustaw '/' register po zatwierdzeniu wzorca
   save_history = true, -- zapisuj wzorce do store (historia FuzzLogg)
 }
 
@@ -28,10 +28,13 @@ local function vim_to_ere(pat)
     elseif c == ">" then
       return "\\>"
     end
+    if c:match("^[dDsSwW]$") then
+      return "\\" .. c
+    end
     if c:match "[%(%)%[%]%{%}%+%?%|%^%$%.]" then
       return c
     end
-    return c
+    return "\\" .. c
   end)
   return s
 end
@@ -79,18 +82,14 @@ local function compute_matches(bufnr, pattern, context)
   local total = #lines
 
   local matched = {}
-  local rg_result = vim
-    .system(
-      { "rg", "--line-number", "--no-heading", "-e", pattern },
-      { stderr = false, stdout = true, text = true, stdin = lines }
-    )
-    :wait()
-  if rg_result.code == 0 and rg_result.stdout then
-    for line in rg_result.stdout:gmatch "[^\n]+" do
-      local lnum = tonumber(line:match "^(%d+):")
-      if lnum then
-        matched[lnum] = true
-      end
+  local ok, regex = pcall(vim.regex, pattern)
+  if not ok then
+    vim.notify("fzf-foldsearch: invalid Vim regex: " .. pattern, vim.log.levels.WARN)
+    return lines, matched, {}
+  end
+  for i, line in ipairs(lines) do
+    if regex:match_str(line) then
+      matched[i] = true
     end
   end
 
@@ -195,7 +194,7 @@ local function do_fold(bufnr, pattern)
   state.bufnr = bufnr
 
   if config.update_last_search then
-    vim.fn.setreg("/", ere_to_vim(pattern))
+    vim.fn.setreg("/", pattern)
   end
   if config.save_history then
     require("fzf-foldsearch.store").add_pattern(pattern)
@@ -220,10 +219,18 @@ function M.fold_search()
     end)
   end
 
+  local last_search = ""
   local init_query = ""
   if config.sync_last_search then
-    local last = vim.fn.getreg "/"
-    init_query = last ~= "" and vim_to_ere(last) or ""
+    last_search = vim.fn.getreg "/"
+    init_query = last_search ~= "" and vim_to_ere(last_search) or ""
+  end
+
+  local function pattern_from_query(pattern)
+    if pattern == init_query and init_query ~= "" then
+      return last_search
+    end
+    return pattern
   end
 
   local grep_fun = nil
@@ -239,11 +246,12 @@ function M.fold_search()
     actions = {
       ["enter"] = function(_, opts)
         with_pattern(opts, function(pattern)
-          do_fold(bufnr, pattern)
+          do_fold(bufnr, pattern_from_query(pattern))
         end)
       end,
       ["ctrl-x"] = function(_, opts)
         with_pattern(opts, function(pattern)
+          pattern = pattern_from_query(pattern)
           local lines, matched, _ = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
@@ -256,6 +264,7 @@ function M.fold_search()
       end,
       ["ctrl-o"] = function(_, opts)
         with_pattern(opts, function(pattern)
+          pattern = pattern_from_query(pattern)
           local lines, _, visible = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
@@ -326,6 +335,7 @@ M.fuzzlogg_jump_to_source = fuzzlogg.fuzzlogg_jump_to_source
 M.fuzzlogg_jump_to_result = fuzzlogg.fuzzlogg_jump_to_result
 M.fuzzlogg_save = fuzzlogg.fuzzlogg_save
 M.fuzzlogg_load = fuzzlogg.fuzzlogg_load
+M.fuzzlogg_load_pattern = fuzzlogg.fuzzlogg_load_pattern
 
 local panel = require "fzf-foldsearch.panel"
 M.fuzzlogg_panel = panel.panel_open

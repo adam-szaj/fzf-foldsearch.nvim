@@ -16,8 +16,8 @@ local function load()
   if not ok2 or type(decoded) ~= 'table' then
     return { patterns = {}, compositions = {} }
   end
-  decoded.patterns = decoded.patterns or {}
-  decoded.compositions = decoded.compositions or {}
+  if type(decoded.patterns) ~= 'table' then decoded.patterns = {} end
+  if type(decoded.compositions) ~= 'table' then decoded.compositions = {} end
   return decoded
 end
 
@@ -95,20 +95,19 @@ end
 
 function M.rename_composition(old_name, new_name)
   local data = load()
-  for _, c in ipairs(data.compositions) do
+  for i, c in ipairs(data.compositions) do
     if c.name == old_name then
-      c.name = new_name
-      save(data)
-      return true
+      return M.rename_composition_by_idx(i, new_name)
     end
   end
   return false
 end
 
 function M.delete_composition(name)
+  if not name then return false end
   local data = load()
   for i, c in ipairs(data.compositions) do
-    if c.name == name or (not name and not c.name and c.created_at == name) then
+    if c.name == name then
       table.remove(data.compositions, i)
       save(data)
       return true
@@ -118,6 +117,7 @@ function M.delete_composition(name)
 end
 
 function M.delete_composition_by_idx(idx)
+  if type(idx) ~= 'number' or idx < 1 or idx % 1 ~= 0 then return false end
   local data = load()
   if data.compositions[idx] then
     table.remove(data.compositions, idx)
@@ -133,6 +133,7 @@ function M.get_compositions()
 end
 
 function M.pin_composition(name, pinned)
+  if not name then return false end
   local data = load()
   for _, c in ipairs(data.compositions) do
     if c.name == name then
@@ -144,7 +145,39 @@ function M.pin_composition(name, pinned)
   return false
 end
 
+function M.pin_composition_by_idx(idx, pinned)
+  if type(idx) ~= 'number' or idx < 1 or idx % 1 ~= 0 then return false end
+  local data = load()
+  local composition = data.compositions[idx]
+  if not composition then return false end
+  composition.pinned = (pinned ~= false)
+  save(data)
+  return true
+end
+
+function M.rename_composition_by_idx(idx, new_name)
+  if type(idx) ~= 'number' or idx < 1 or idx % 1 ~= 0 or not new_name or new_name == '' then
+    return false
+  end
+  local data = load()
+  local composition = data.compositions[idx]
+  if not composition then return false end
+  if composition.namespace then
+    local ns = composition.namespace
+    local label = new_name:match('^' .. vim.pesc(ns) .. '::([%w_%-]+)$') or new_name
+    if not label:match('^[%w_%-]+$') then return false end
+    new_name = ns .. '::' .. label
+  end
+  for i, other in ipairs(data.compositions) do
+    if i ~= idx and other.name == new_name then return false end
+  end
+  composition.name = new_name
+  save(data)
+  return true
+end
+
 function M.get_composition_expr(name)
+  if type(name) ~= 'string' or name == '' then return nil end
   local data = load()
   for _, c in ipairs(data.compositions) do
     if c.name == name then
@@ -154,54 +187,31 @@ function M.get_composition_expr(name)
   return nil
 end
 
-function M.clear_namespace(ns)
+function M.replace_namespaces(namespaces)
   local data = load()
+  local replaced = {}
+  for ns in pairs(namespaces) do
+    replaced[ns] = true
+  end
   local kept = {}
-  for _, c in ipairs(data.compositions) do
-    if c.namespace ~= ns then
-      table.insert(kept, c)
+  for _, composition in ipairs(data.compositions) do
+    if not replaced[composition.namespace] then
+      table.insert(kept, composition)
     end
   end
   data.compositions = kept
-  save(data)
-end
 
-function M.get_by_namespace(ns)
-  local data = load()
-  local result = {}
-  for _, c in ipairs(data.compositions) do
-    if c.namespace == ns then
-      table.insert(result, c)
+  for ns, entries in pairs(namespaces) do
+    for _, entry in ipairs(entries) do
+      table.insert(data.compositions, {
+        name = ns .. '::' .. entry.label,
+        expr = entry.expr,
+        pinned = true,
+        namespace = ns,
+        created_at = os.time(),
+      })
     end
   end
-  return result
-end
-
-function M.has_namespace(ns)
-  local data = load()
-  for _, c in ipairs(data.compositions) do
-    if c.namespace == ns then return true end
-  end
-  return false
-end
-
-function M.save_namespaced(name, expr, ns)
-  local data = load()
-  for i, c in ipairs(data.compositions) do
-    if c.name == name then
-      data.compositions[i].expr = expr
-      data.compositions[i].created_at = os.time()
-      save(data)
-      return
-    end
-  end
-  table.insert(data.compositions, {
-    name       = name,
-    expr       = expr,
-    pinned     = true,
-    namespace  = ns,
-    created_at = os.time(),
-  })
   save(data)
 end
 

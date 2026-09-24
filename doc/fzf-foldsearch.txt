@@ -34,7 +34,7 @@ Requires: Neovim 0.10+, fzf-lua
 2. FOLDSEARCH                                                     *foldsearch*
 
 FoldSearch folds away all lines that do not match a pattern. Uses fzf-lua as
-the pattern picker and Lua/LuaJIT for fast matching.
+the pattern picker and Neovim's Vim-regex engine for matching.
 
 For files larger than `large_file_mb` (default 50 MB), treesitter and LSP are
 automatically disabled to prevent lag.
@@ -106,6 +106,11 @@ Features:
   - Set algebra via RPN expressions (union, intersection, difference, complement)
   - Persistent pattern history and named/anonymous compositions
 
+Include patterns combine with OR. Exclude patterns veto matching lines; when a
+line matches multiple include patterns, the first matching include determines
+its highlight color. Context is added around accepted lines after filtering,
+so context rows are not filtered again.
+
 ------------------------------------------------------------------------------
 3.1 Workflow                                            *fuzzlogg-workflow*
 
@@ -120,6 +125,9 @@ Features:
 7. Save the current pattern set with |:FuzzLoggSave| and reload later from
    |:FuzzLoggPanel|.
 8. Run |:FuzzLoggClose| when done.
+
+The `<leader>v…` mappings mentioned in this workflow are suggestions; the
+plugin does not register them. Define them in your Neovim configuration.
 
 ------------------------------------------------------------------------------
 3.2 Commands                                            *fuzzlogg-commands*
@@ -159,13 +167,14 @@ Features:
 
                                                               *:FuzzLoggSave*
 :FuzzLoggSave [name]
-    Save the current pattern set as a composition named {name}. If {name} is
-    omitted, prompts for a name via |vim.ui.input()|. The composition is
-    stored in |fuzzlogg-persistence| and can be reloaded later.
+    Save the current filter as a composition named {name}. If {name} is
+    omitted, prompts for a name via |vim.ui.input()|. Names may contain spaces.
+    The composition is stored in |fuzzlogg-persistence| and can be reloaded
+    later.
 
                                                               *:FuzzLoggLoad*
 :FuzzLoggLoad {name|expr}
-    Load patterns into the active session from either:
+    Load a composition or an RPN expression into the active session from:
       - a saved composition name, or
       - a raw RPN expression (see |fuzzlogg-rpn|)
 
@@ -173,6 +182,13 @@ Features:
         :FuzzLoggLoad errors-clean
         :FuzzLoggLoad /ERROR/ /WARN/ |
 <
+
+                                                        *:FuzzLoggImport*
+:FuzzLoggImport {file}
+    Import named compositions from a `.fl` file. Each nonblank line is
+    `label: expression`; full-line comments beginning with `#` are ignored.
+    The file name stem is used as the composition namespace. Referenced
+    namespaces are validated and imported before the store is updated.
 
                                                              *:FuzzLoggPanel*
 :FuzzLoggPanel
@@ -195,8 +211,9 @@ FuzzLogg uses Reverse Polish Notation (postfix) to express set operations over
 lines. Parentheses are allowed for readability but are ignored by the parser.
 
 Atoms ~
-  `/regex/`     set of lines matching the Vim regex
+  `/regex/`     set of lines matching the Vim regex (spaces are allowed)
   `name`        reference to a saved composition (resolved recursively)
+  `@empty`      the empty set
 
 Operators ~
   `|`           union        A | B  →  lines in A or B
@@ -204,7 +221,8 @@ Operators ~
   `-`           difference   A - B  →  lines in A but not in B
   `~`           complement   A ~    →  all lines not in A  (unary, postfix)
 
-Maximum expression depth: 5 levels (including referenced compositions).
+Maximum expression-tree depth: 128 levels. Composition references may be
+expanded through at most 5 nested levels.
 
 Examples: >
 
@@ -245,8 +263,8 @@ Panel layout: >
 
 Panel keymaps ~
 
-  <Enter>       Load the composition or pattern under the cursor into the
-                active FuzzLogg session.
+    <Enter>       Load the composition or pattern under the cursor into the
+                  active FuzzLogg session.
   a             Add the pattern under the cursor to the session (inclusive).
   x             Add the pattern under the cursor to the session (exclusive).
   p             Toggle pin for the composition under the cursor. Pinned
@@ -256,6 +274,9 @@ Panel keymaps ~
   s             Save the current FuzzLogg session as a new composition
                 (prompts for a name).
   q             Close the panel.
+
+Panel composition actions use the underlying stored composition, including
+for anonymous compositions and grouped namespace entries.
 
 ------------------------------------------------------------------------------
 3.5 Persistence                                        *fuzzlogg-persistence*
@@ -274,9 +295,13 @@ Named compositions ~
     deleted from the panel.
 
 Anonymous compositions ~
-    Auto-saved after every change to the active pattern set. The oldest
-    anonymous composition is deleted when the count exceeds `max_anon`
-    (default 20). Pinned anonymous compositions are never deleted.
+    Auto-saved after adding, removing, clearing, or loading a filter. Context
+    is not stored. The oldest unpinned anonymous composition is deleted when
+    the count exceeds `max_anon` (default 20), leaving the newest 20. Pinned
+    anonymous compositions are never deleted.
+
+    Empty filters are stored as `@empty`. Older plugin versions do not
+    recognize this RPN atom and cannot load those snapshots.
 
 ------------------------------------------------------------------------------
 3.6 Configuration                                         *fuzzlogg-config*

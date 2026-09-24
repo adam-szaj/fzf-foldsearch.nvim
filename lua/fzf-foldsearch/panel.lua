@@ -5,156 +5,143 @@ local store = require('fzf-foldsearch.store')
 local state = {
   bufnr = nil,
   win = nil,
+  row_actions = {},
 }
 
-local function buf_line_type(line)
-  if line:match('^  /') or line:match('^  %S') then
-    local trimmed = line:match('^%s+(.+)$')
-    if trimmed then return 'pattern', trimmed end
-  end
-  if line:match('^  %[') then
-    local name = line:match('%[pinned%]%s+(%S+)') or line:match('%[anon%]%s+(%S+)')
-    local expr = line:match('%s%s(.+)$')
-    return 'composition', name, expr
-  end
-  return nil
-end
-
 local function render(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
   local lines = { '# FuzzLogg Panel', '' }
+  local row_actions = {}
+  local function add_line(line, action)
+    table.insert(lines, line)
+    if action then row_actions[#lines] = action end
+  end
 
-  table.insert(lines, '## Patterns (history)')
+  add_line('## Patterns (history)')
   local patterns = store.get_patterns()
   if #patterns == 0 then
-    table.insert(lines, '  (empty)')
+    add_line('  (empty)')
   else
-    for _, p in ipairs(patterns) do
-      table.insert(lines, '  ' .. p)
+    for _, pattern in ipairs(patterns) do
+      add_line('  ' .. pattern, { kind = 'pattern', pattern = pattern })
     end
   end
 
-  table.insert(lines, '')
-  table.insert(lines, '## Compositions')
+  add_line('')
+  add_line('## Compositions')
   local compositions = store.get_compositions()
   if #compositions == 0 then
-    table.insert(lines, '  (empty)')
+    add_line('  (empty)')
   else
-    -- separate namespaced from anonymous/named
     local no_ns = {}
     local by_ns = {}
     local ns_order = {}
-    for _, c in ipairs(compositions) do
-      if c.namespace then
-        if not by_ns[c.namespace] then
-          by_ns[c.namespace] = {}
-          table.insert(ns_order, c.namespace)
+    for index, composition in ipairs(compositions) do
+      local item = { composition = composition, index = index }
+      if composition.namespace then
+        if not by_ns[composition.namespace] then
+          by_ns[composition.namespace] = {}
+          table.insert(ns_order, composition.namespace)
         end
-        table.insert(by_ns[c.namespace], c)
+        table.insert(by_ns[composition.namespace], item)
       else
-        table.insert(no_ns, c)
+        table.insert(no_ns, item)
       end
     end
 
-    for _, c in ipairs(no_ns) do
-      local tag = c.pinned and '[pinned]' or '[anon]  '
-      local label = c.name or os.date('%Y-%m-%d %H:%M', c.created_at)
-      table.insert(lines, string.format('  %s %-24s  %s', tag, label, c.expr))
+    local function add_composition(item)
+      local composition = item.composition
+      local tag = composition.pinned and '[pinned]' or '[anon]  '
+      local label = composition.name or os.date('%Y-%m-%d %H:%M', composition.created_at)
+      add_line(string.format('  %s %-24s  %s', tag, label, composition.expr), {
+        kind = 'composition',
+        composition = composition,
+        index = item.index,
+      })
     end
 
+    for _, item in ipairs(no_ns) do
+      add_composition(item)
+    end
     for _, ns in ipairs(ns_order) do
-      table.insert(lines, '')
-      table.insert(lines, '  ' .. ns .. '::')
-      for _, c in ipairs(by_ns[ns]) do
-        local tag = c.pinned and '[pinned]' or '[anon]  '
-        local label = c.name or os.date('%Y-%m-%d %H:%M', c.created_at)
-        table.insert(lines, string.format('  %s %-24s  %s', tag, label, c.expr))
+      add_line('')
+      add_line('  ' .. ns .. '::')
+      for _, item in ipairs(by_ns[ns]) do
+        add_composition(item)
       end
     end
   end
 
-  table.insert(lines, '')
-  table.insert(lines, '── Keys: <CR> load  a/x include/exclude pattern  p pin  d delete  r rename  s save session  q close ──')
+  add_line('')
+  add_line('── Keys: <CR> load  a/x include/exclude pattern  p pin  d delete  r rename  s save session  q close ──')
 
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].modifiable = false
+  state.row_actions = row_actions
 end
 
 local function setup_keymaps(bufnr)
   local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
   local opts = { buffer = bufnr, nowait = true, silent = true }
+  local function current_action()
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    return state.row_actions[row]
+  end
 
   vim.keymap.set('n', 'q', function() M.panel_close() end, opts)
 
   vim.keymap.set('n', '<CR>', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name, expr = buf_line_type(line)
-    if kind == 'composition' then
-      fuzzlogg.fuzzlogg_load(name or expr)
-    elseif kind == 'pattern' then
-      fuzzlogg.fuzzlogg_load('/' .. name .. '/')
+    local action = current_action()
+    if not action then return end
+    if action.kind == 'composition' then
+      local composition = action.composition
+      fuzzlogg.fuzzlogg_load(composition.name or composition.expr)
+    elseif action.kind == 'pattern' then
+      fuzzlogg.fuzzlogg_load_pattern(action.pattern)
     end
+    render(bufnr)
   end, opts)
 
   vim.keymap.set('n', 'a', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name = buf_line_type(line)
-    if kind == 'pattern' then
-      -- add to active session as inclusive via direct call
-      local fl = require('fzf-foldsearch.fuzzlogg')
-      fl._add_pattern_direct(name, true)
+    local action = current_action()
+    if action and action.kind == 'pattern' then
+      fuzzlogg._add_pattern_direct(action.pattern, true)
       render(bufnr)
     end
   end, opts)
 
   vim.keymap.set('n', 'x', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name = buf_line_type(line)
-    if kind == 'pattern' then
-      local fl = require('fzf-foldsearch.fuzzlogg')
-      fl._add_pattern_direct(name, false)
+    local action = current_action()
+    if action and action.kind == 'pattern' then
+      fuzzlogg._add_pattern_direct(action.pattern, false)
       render(bufnr)
     end
   end, opts)
 
   vim.keymap.set('n', 'p', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name = buf_line_type(line)
-    if kind == 'composition' and name then
-      local comps = store.get_compositions()
-      for _, c in ipairs(comps) do
-        if c.name == name then
-          store.pin_composition(name, not c.pinned)
-          break
-        end
-      end
+    local action = current_action()
+    if action and action.kind == 'composition' then
+      store.pin_composition_by_idx(action.index, not action.composition.pinned)
       render(bufnr)
     end
   end, opts)
 
   vim.keymap.set('n', 'd', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name = buf_line_type(line)
-    if kind == 'composition' then
-      local row = vim.api.nvim_win_get_cursor(0)[1]
-      local comp_start = 0
-      local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      for i, l in ipairs(all_lines) do
-        if l == '## Compositions' then comp_start = i; break end
-      end
-      local idx = row - comp_start - 1
-      store.delete_composition_by_idx(idx)
+    local action = current_action()
+    if action and action.kind == 'composition' then
+      store.delete_composition_by_idx(action.index)
       render(bufnr)
     end
   end, opts)
 
   vim.keymap.set('n', 'r', function()
-    local line = vim.api.nvim_get_current_line()
-    local kind, name = buf_line_type(line)
-    if kind == 'composition' and name then
-      vim.ui.input({ prompt = 'Rename to: ', default = name }, function(input)
+    local action = current_action()
+    if action and action.kind == 'composition' then
+      local default = action.composition.name or os.date('%Y-%m-%d %H:%M', action.composition.created_at)
+      vim.ui.input({ prompt = 'Rename to: ', default = default }, function(input)
         if input and input ~= '' then
-          store.rename_composition(name, input)
+          store.rename_composition_by_idx(action.index, input)
           render(bufnr)
         end
       end)
@@ -162,9 +149,7 @@ local function setup_keymaps(bufnr)
   end, opts)
 
   vim.keymap.set('n', 's', function()
-    local fl = require('fzf-foldsearch.fuzzlogg')
-    fl.fuzzlogg_save(nil)
-    vim.defer_fn(function() render(bufnr) end, 200)
+    fuzzlogg.fuzzlogg_save(nil, function() render(bufnr) end)
   end, opts)
 end
 
@@ -201,6 +186,7 @@ function M.panel_open()
     callback = function()
       state.bufnr = nil
       state.win = nil
+      state.row_actions = {}
     end,
   })
 end

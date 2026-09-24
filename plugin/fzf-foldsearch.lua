@@ -7,7 +7,7 @@ end, { desc = 'Fzf fold search' })
 
 vim.api.nvim_create_user_command('FzfFoldSearchExpr', function(args)
   require('fzf-foldsearch').fold_search_expr(args.args)
-end, { nargs = 1, desc = 'Fold search with explicit rg regex pattern' })
+end, { nargs = 1, desc = 'Fold search with explicit Vim regex pattern' })
 
 vim.api.nvim_create_user_command('FzfFoldEnd', function()
   require('fzf-foldsearch').fold_end()
@@ -30,12 +30,21 @@ vim.api.nvim_create_user_command('FuzzLoggOpen', function()
 end, { desc = 'Open FuzzLogg for current buffer' })
 
 vim.api.nvim_create_user_command('FuzzLoggAdd', function(args)
+  if args.args ~= '' and args.args ~= 'include' and args.args ~= 'exclude' then
+    vim.notify('FuzzLogg: expected "include" or "exclude"', vim.log.levels.ERROR)
+    return
+  end
   local inclusive = args.args ~= 'exclude'
   require('fzf-foldsearch').fuzzlogg_add(inclusive)
 end, { nargs = '?', desc = 'Add FuzzLogg pattern (include|exclude, default: include)' })
 
 vim.api.nvim_create_user_command('FuzzLoggRemove', function(args)
-  require('fzf-foldsearch').fuzzlogg_remove(tonumber(args.args) or 1)
+  local index = tonumber(args.args)
+  if not index then
+    vim.notify('FuzzLogg: expected a positive pattern index', vim.log.levels.ERROR)
+    return
+  end
+  require('fzf-foldsearch').fuzzlogg_remove(index)
 end, { nargs = 1, desc = 'Remove FuzzLogg pattern by index' })
 
 vim.api.nvim_create_user_command('FuzzLoggClear', function()
@@ -64,11 +73,11 @@ end, { desc = 'Jump from FuzzLogg result to source line' })
 
 vim.api.nvim_create_user_command('FuzzLoggSave', function(args)
   require('fzf-foldsearch').fuzzlogg_save(args.args ~= '' and args.args or nil)
-end, { nargs = '?', desc = 'Save current FuzzLogg session as composition' })
+end, { nargs = '*', desc = 'Save current FuzzLogg session as composition' })
 
 vim.api.nvim_create_user_command('FuzzLoggLoad', function(args)
   require('fzf-foldsearch').fuzzlogg_load(args.args)
-end, { nargs = 1, desc = 'Load composition or RPN expression into FuzzLogg' })
+end, { nargs = '+', bar = false, desc = 'Load composition or RPN expression into FuzzLogg' })
 
 vim.api.nvim_create_user_command('FuzzLoggPanel', function()
   require('fzf-foldsearch').fuzzlogg_panel()
@@ -76,4 +85,4 @@ end, { desc = 'Open FuzzLogg panel (patterns & compositions)' })
 
 vim.api.nvim_create_user_command('FuzzLoggImport', function(args)
   require('fzf-foldsearch.importer').import(vim.fn.expand(args.args))
-end, { nargs = 1, complete = 'file', desc = 'Import .fl file into FuzzLogg store' })
+end, { nargs = '+', complete = 'file', desc = 'Import .fl file into FuzzLogg store' })
