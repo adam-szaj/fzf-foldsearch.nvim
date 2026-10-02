@@ -135,7 +135,8 @@ plugin does not register them. Define them in your Neovim configuration.
                                                               *:FuzzLoggOpen*
 :FuzzLoggOpen
     Open FuzzLogg for the current buffer. Opens a results panel (layout
-    controlled by `fuzzlogg.layout` in |fuzzlogg-config|).
+    controlled by `fuzzlogg.layout` in |fuzzlogg-config|). This is optional:
+    commands that need a session open one for the current buffer automatically.
 
                                                                *:FuzzLoggAdd*
 :FuzzLoggAdd [include|exclude] [pattern]
@@ -290,6 +291,9 @@ Panel keymaps ~
   s             Save the current FuzzLogg session as a new composition
                 (prompts for a name).
   q             Close the panel.
+
+If a panel action needs a session, it opens one for the source window
+associated with the panel.
 
 Panel composition actions use the underlying stored composition, including
 for anonymous compositions and grouped namespace entries.

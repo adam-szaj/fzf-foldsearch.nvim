@@ -5,6 +5,7 @@ local store = require('fzf-foldsearch.store')
 local state = {
   bufnr = nil,
   win = nil,
+  source_win = nil,
   row_actions = {},
 }
 
@@ -84,6 +85,9 @@ end
 local function setup_keymaps(bufnr)
   local fuzzlogg = require('fzf-foldsearch.fuzzlogg')
   local opts = { buffer = bufnr, nowait = true, silent = true }
+  local function ensure_session()
+    return fuzzlogg.ensure_open(state.source_win)
+  end
   local function current_action()
     local row = vim.api.nvim_win_get_cursor(0)[1]
     return state.row_actions[row]
@@ -94,6 +98,7 @@ local function setup_keymaps(bufnr)
   vim.keymap.set('n', '<CR>', function()
     local action = current_action()
     if not action then return end
+    if not ensure_session() then return end
     if action.kind == 'composition' then
       local composition = action.composition
       fuzzlogg.fuzzlogg_load(composition.name or composition.expr)
@@ -106,6 +111,7 @@ local function setup_keymaps(bufnr)
   vim.keymap.set('n', 'a', function()
     local action = current_action()
     if action and action.kind == 'pattern' then
+      if not ensure_session() then return end
       fuzzlogg._add_pattern_direct(action.pattern, true)
       render(bufnr)
     end
@@ -114,6 +120,7 @@ local function setup_keymaps(bufnr)
   vim.keymap.set('n', 'x', function()
     local action = current_action()
     if action and action.kind == 'pattern' then
+      if not ensure_session() then return end
       fuzzlogg._add_pattern_direct(action.pattern, false)
       render(bufnr)
     end
@@ -149,12 +156,18 @@ local function setup_keymaps(bufnr)
   end, opts)
 
   vim.keymap.set('n', 's', function()
+    if not ensure_session() then return end
     fuzzlogg.fuzzlogg_save(nil, function() render(bufnr) end)
   end, opts)
 end
 
 function M.panel_open()
+  local current_win = vim.api.nvim_get_current_win()
+  if current_win ~= state.win then
+    state.source_win = require('fzf-foldsearch.fuzzlogg').source_window() or current_win
+  end
   if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+    vim.b[state.bufnr].fuzzlogg_source_win = state.source_win
     if state.win and vim.api.nvim_win_is_valid(state.win) then
       vim.api.nvim_set_current_win(state.win)
     else
@@ -175,6 +188,7 @@ function M.panel_open()
   vim.bo[state.bufnr].bufhidden = 'wipe'
   vim.bo[state.bufnr].swapfile = false
   vim.bo[state.bufnr].modifiable = false
+  vim.b[state.bufnr].fuzzlogg_source_win = state.source_win
   pcall(vim.api.nvim_buf_set_name, state.bufnr, 'fuzzlogg://panel')
 
   render(state.bufnr)
@@ -186,6 +200,7 @@ function M.panel_open()
     callback = function()
       state.bufnr = nil
       state.win = nil
+      state.source_win = nil
       state.row_actions = {}
     end,
   })

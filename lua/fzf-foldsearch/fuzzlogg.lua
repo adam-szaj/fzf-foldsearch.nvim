@@ -278,7 +278,7 @@ end
 
 local function add_pattern(pattern, inclusive, defer_update, transient, matcher)
   if not state.active then
-    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
+    vim.notify('FuzzLogg: session closed before pattern was added', vim.log.levels.WARN)
     return false
   end
   if active_pattern_count() >= config.max_patterns then
@@ -397,11 +397,27 @@ function M.fuzzlogg_open()
   vim.notify('FuzzLogg: opened. Add patterns with fuzzlogg_add()', vim.log.levels.INFO)
 end
 
-function M.fuzzlogg_add(inclusive, pattern)
-  if not state.active then
-    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
-    return
+function M.ensure_open(source_win)
+  if state.active then return true end
+  source_win = source_win or vim.b.fuzzlogg_source_win
+  if source_win then
+    if not vim.api.nvim_win_is_valid(source_win) then
+      vim.notify('FuzzLogg: source window is no longer available', vim.log.levels.WARN)
+      return false
+    end
+    vim.api.nvim_win_call(source_win, M.fuzzlogg_open)
+  else
+    M.fuzzlogg_open()
   end
+  return state.active
+end
+
+function M.source_window()
+  return state.active and state.src_win or nil
+end
+
+function M.fuzzlogg_add(inclusive, pattern)
+  if not M.ensure_open() then return end
   inclusive = (inclusive ~= false)
   if pattern ~= nil then
     add_pattern(pattern, inclusive)
@@ -434,10 +450,7 @@ function M.fuzzlogg_add(inclusive, pattern)
 end
 
 function M.fuzzlogg_add_group(group, pattern)
-  if not state.active then
-    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
-    return
-  end
+  if not M.ensure_open() then return end
   local lines = vim.api.nvim_buf_get_lines(state.src_bufnr, 0, -1, false)
   local available = config.max_patterns - active_pattern_count()
   local patterns, err = require('fzf-foldsearch.group_patterns').expand(pattern, group, lines, available)
@@ -458,10 +471,7 @@ function M.fuzzlogg_add_group(group, pattern)
 end
 
 function M.fuzzlogg_save(name, on_saved)
-  if not state.active then
-    vim.notify('FuzzLogg: not active', vim.log.levels.WARN)
-    return
-  end
+  if not M.ensure_open() then return end
   local expr = build_expr()
   if not expr then
     vim.notify('FuzzLogg: no persistent patterns to save', vim.log.levels.WARN)
@@ -531,10 +541,7 @@ local function load_tree(tree)
 end
 
 function M.fuzzlogg_load(expr_or_name)
-  if not state.active then
-    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
-    return
-  end
+  if not M.ensure_open() then return end
   if type(expr_or_name) ~= 'string' or expr_or_name == '' then
     vim.notify('FuzzLogg: no composition or expression given', vim.log.levels.WARN)
     return
@@ -551,10 +558,7 @@ function M.fuzzlogg_load(expr_or_name)
 end
 
 function M.fuzzlogg_load_pattern(pattern)
-  if not state.active then
-    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
-    return
-  end
+  if not M.ensure_open() then return end
   if type(pattern) ~= 'string' or pattern == '' then return end
   load_tree({ type = 'pattern', value = pattern })
 end
@@ -579,7 +583,7 @@ local function remove_pattern_indices(indices)
 end
 
 function M.fuzzlogg_remove(idx)
-  if not state.active then return end
+  if not M.ensure_open() then return end
   local labels = active_pattern_labels()
   if idx == nil then
     if #labels == 0 then
@@ -618,7 +622,7 @@ function M.fuzzlogg_remove(idx)
 end
 
 function M.fuzzlogg_clear()
-  if not state.active then return end
+  if not M.ensure_open() then return end
   local had_persistent = build_expr() ~= nil
   clear_highlights(all_patterns())
   state.base = nil
@@ -650,16 +654,14 @@ function M.fuzzlogg_close()
 end
 
 function M.fuzzlogg_context_add(n)
-  if not state.active then
-    vim.notify('FuzzLogg: not active', vim.log.levels.WARN)
-    return
-  end
+  if not M.ensure_open() then return end
   state.context = math.max(0, state.context + n)
   schedule_render()
 end
 
 function M.fuzzlogg_list()
-  if not state.active or (#state.patterns == 0 and not state.base) then
+  if not M.ensure_open() then return end
+  if #state.patterns == 0 and not state.base then
     vim.notify('FuzzLogg: no active patterns', vim.log.levels.INFO)
     return
   end
@@ -667,7 +669,7 @@ function M.fuzzlogg_list()
 end
 
 function M.fuzzlogg_jump_to_source()
-  if not state.active then return end
+  if not M.ensure_open() then return end
   if not vim.api.nvim_win_is_valid(state.res_win) then return end
   local res_line = vim.api.nvim_win_get_cursor(state.res_win)[1]
   local src_line = state.line_map[res_line]
@@ -682,7 +684,7 @@ function M.fuzzlogg_jump_to_source()
 end
 
 function M.fuzzlogg_jump_to_result()
-  if not state.active then return end
+  if not M.ensure_open() then return end
   if not vim.api.nvim_win_is_valid(state.src_win) then return end
   local src_line = vim.api.nvim_win_get_cursor(state.src_win)[1]
   local res_line = state.src_map[src_line]
@@ -696,7 +698,10 @@ function M.fuzzlogg_jump_to_result()
   end
 end
 
-M._add_pattern_direct = add_pattern
+function M._add_pattern_direct(pattern, inclusive)
+  if not M.ensure_open() then return false end
+  return add_pattern(pattern, inclusive)
+end
 
 function M.setup(opts)
   config = vim.tbl_deep_extend('force', config, opts or {})

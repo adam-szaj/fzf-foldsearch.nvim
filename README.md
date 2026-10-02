@@ -151,6 +151,8 @@ You have a log file open and want to investigate errors, but ignore noise from a
 Press `,vo` (or `:FuzzLoggOpen`).
 
 A new panel opens to the right (vsplit by default). It's empty — no patterns yet.
+This step is optional: `:FuzzLoggAdd` and other commands that need a session
+open one automatically for the current buffer.
 
 **Step 2 — Add your first pattern**
 

@@ -17,6 +17,10 @@ Open a log or text buffer and run:
 :FuzzLoggAdd exclude
 ```
 
+`:FuzzLoggOpen` is optional. Commands that need a session open one automatically
+for the current buffer. Panel actions use the source window associated with the
+panel.
+
 The default layout is a vertical split. `fuzzlogg.layout` also accepts `split`
 and `same_window`. In the picker, press `<Alt-Enter>` to add the typed Vim regex
 even if history matches, or `<Enter>` to select an item from shared FoldSearch
