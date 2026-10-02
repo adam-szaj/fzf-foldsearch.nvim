@@ -30,22 +30,42 @@ vim.api.nvim_create_user_command('FuzzLoggOpen', function()
 end, { desc = 'Open FuzzLogg for current buffer' })
 
 vim.api.nvim_create_user_command('FuzzLoggAdd', function(args)
-  if args.args ~= '' and args.args ~= 'include' and args.args ~= 'exclude' then
-    vim.notify('FuzzLogg: expected "include" or "exclude"', vim.log.levels.ERROR)
+  local inclusive = true
+  local pattern = args.args
+  local mode, rest = pattern:match('^(%S+)%s+(.+)$')
+  if mode == 'include' or mode == 'exclude' then
+    inclusive = mode ~= 'exclude'
+    pattern = rest
+  elseif pattern == 'include' or pattern == 'exclude' then
+    inclusive = pattern ~= 'exclude'
+    pattern = nil
+  elseif pattern == '' then
+    pattern = nil
+  end
+  require('fzf-foldsearch').fuzzlogg_add(inclusive, pattern)
+end, { nargs = '*', bar = false, desc = 'Add FuzzLogg pattern (include|exclude, default: include)' })
+
+vim.api.nvim_create_user_command('FuzzLoggAddGroup', function(args)
+  local group, pattern = args.args:match('^(%S+)%s+(.+)$')
+  if not pattern then
+    vim.notify('FuzzLogg: expected group number and Vim regex', vim.log.levels.ERROR)
     return
   end
-  local inclusive = args.args ~= 'exclude'
-  require('fzf-foldsearch').fuzzlogg_add(inclusive)
-end, { nargs = '?', desc = 'Add FuzzLogg pattern (include|exclude, default: include)' })
+  require('fzf-foldsearch').fuzzlogg_add_group(tonumber(group), pattern)
+end, { nargs = '+', bar = false, desc = 'Add patterns for each distinct regex group value' })
 
 vim.api.nvim_create_user_command('FuzzLoggRemove', function(args)
+  if args.args == '' then
+    require('fzf-foldsearch').fuzzlogg_remove()
+    return
+  end
   local index = tonumber(args.args)
   if not index then
     vim.notify('FuzzLogg: expected a positive pattern index', vim.log.levels.ERROR)
     return
   end
   require('fzf-foldsearch').fuzzlogg_remove(index)
-end, { nargs = 1, desc = 'Remove FuzzLogg pattern by index' })
+end, { nargs = '?', desc = 'Remove FuzzLogg patterns via picker or by index' })
 
 vim.api.nvim_create_user_command('FuzzLoggClear', function()
   require('fzf-foldsearch').fuzzlogg_clear()

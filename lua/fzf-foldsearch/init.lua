@@ -326,6 +326,7 @@ end
 local fuzzlogg = require "fzf-foldsearch.fuzzlogg"
 M.fuzzlogg_open = fuzzlogg.fuzzlogg_open
 M.fuzzlogg_add = fuzzlogg.fuzzlogg_add
+M.fuzzlogg_add_group = fuzzlogg.fuzzlogg_add_group
 M.fuzzlogg_remove = fuzzlogg.fuzzlogg_remove
 M.fuzzlogg_clear = fuzzlogg.fuzzlogg_clear
 M.fuzzlogg_close = fuzzlogg.fuzzlogg_close

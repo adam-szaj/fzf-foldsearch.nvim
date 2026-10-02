@@ -18,10 +18,19 @@ Open a log or text buffer and run:
 ```
 
 The default layout is a vertical split. `fuzzlogg.layout` also accepts `split`
-and `same_window`. In the picker, enter a Vim regex or select an item from
-shared FoldSearch pattern history. Includes combine with OR; excludes veto
-matching lines. With only excludes, no lines are selected. When a line matches
+and `same_window`. In the picker, press `<Alt-Enter>` to add the typed Vim regex
+even if history matches, or `<Enter>` to select an item from shared FoldSearch
+pattern history. Includes combine with OR; excludes veto matching lines. With
+only excludes, no lines are selected. When a line matches
 multiple includes, the first matching include determines its highlight color.
+Use `:FuzzLoggAdd ERROR` or `:FuzzLoggAdd exclude heartbeat` to add a pattern
+directly without the picker.
+To create a separate colored pattern for every distinct capture value in the
+source buffer, run `:FuzzLoggAddGroup 1 \v^\[(\S+)\s*\]`. This keeps the regex
+conditions around group 1 and matches each captured value exactly. The existing
+pattern limit applies to the whole batch. Only the source regex is added to
+pattern history; group patterns come only from the current buffer, are
+session-only, and are omitted from saved compositions.
 
 Results update after source edits (100 ms debounce by default). Context can be
 adjusted with `:FuzzLoggContextAdd {n}`. It expands around selected lines after
@@ -33,7 +42,9 @@ not part of a saved composition.
 - Press `<Enter>` in results to jump to the source line.
 - Run `:FuzzLoggJumpToResult` from the source buffer to jump to a visible result.
 - Use `:FuzzLoggList` to see the active filter.
-- Use `:FuzzLoggRemove {n}` to remove an item or `:FuzzLoggClear` to clear it.
+- Use `:FuzzLoggRemove` to select multiple active items with `<Tab>` and remove
+  them with `<Enter>`, `:FuzzLoggRemove {n}` for one index, or `:FuzzLoggClear`
+  to clear all active items.
 
 When a loaded composition is active, `:FuzzLoggList` shows it as one
 `expression` item at index 1. Removing index 1 drops the loaded expression;
@@ -102,8 +113,9 @@ those namespaces in the store.
 | Command | Purpose |
 | --- | --- |
 | `:FuzzLoggOpen` | Open a session for the current buffer |
-| `:FuzzLoggAdd [include\|exclude]` | Pick and add a pattern |
-| `:FuzzLoggRemove {n}` | Remove an active item by one-based index |
+| `:FuzzLoggAdd [include\|exclude] [pattern]` | Pick or directly add a pattern |
+| `:FuzzLoggAddGroup {n} {regex}` | Add one pattern per distinct capture value |
+| `:FuzzLoggRemove [n]` | Pick active items or remove one by index |
 | `:FuzzLoggClear` | Clear the active filter |
 | `:FuzzLoggClose` | End the session |
 | `:FuzzLoggContextAdd {n}` | Change the context line count |

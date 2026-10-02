@@ -1,4 +1,5 @@
 :FuzzLoggAdd	fzf-foldsearch.txt	/*:FuzzLoggAdd*
+:FuzzLoggAddGroup	fzf-foldsearch.txt	/*:FuzzLoggAddGroup*
 :FuzzLoggClear	fzf-foldsearch.txt	/*:FuzzLoggClear*
 :FuzzLoggClose	fzf-foldsearch.txt	/*:FuzzLoggClose*
 :FuzzLoggContextAdd	fzf-foldsearch.txt	/*:FuzzLoggContextAdd*

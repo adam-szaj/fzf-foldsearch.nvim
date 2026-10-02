@@ -57,15 +57,17 @@ local function active_pattern_count()
   return #state.patterns + (state.base and #state.base.patterns or 0)
 end
 
-local function build_filter_tree()
+local function build_filter_tree(persistent_only)
   local tree = state.base and state.base.tree or nil
   local excluded = {}
   for _, pattern in ipairs(state.patterns) do
-    local atom = { type = 'pattern', value = pattern.pattern }
-    if pattern.inclusive then
-      tree = tree and { op = '|', left = tree, right = atom } or atom
-    else
-      table.insert(excluded, atom)
+    if not persistent_only or not pattern.transient then
+      local atom = { type = 'pattern', value = pattern.key or pattern.pattern }
+      if pattern.inclusive then
+        tree = tree and { op = '|', left = tree, right = atom } or atom
+      else
+        table.insert(excluded, atom)
+      end
     end
   end
 
@@ -95,7 +97,7 @@ local function compute_lines(src_lines, context)
   local patterns = all_patterns()
   local regex_cache = {}
   for _, pattern in ipairs(patterns) do
-    regex_cache[pattern.pattern] = pattern.re
+    regex_cache[pattern.key or pattern.pattern] = pattern.re
   end
   local selected = rpn.eval(tree, src_lines, store.get_composition_expr, regex_cache)
   local highlight_patterns = {}
@@ -265,7 +267,7 @@ local function setup_autocmds()
 end
 
 local function build_expr()
-  local tree = build_filter_tree()
+  local tree = build_filter_tree(true)
   return tree and rpn.serialize(tree) or nil
 end
 
@@ -274,25 +276,39 @@ local function auto_save()
   store.save_composition(nil, build_expr() or '@empty')
 end
 
-local function add_pattern(pattern, inclusive)
+local function add_pattern(pattern, inclusive, defer_update, transient, matcher)
   if not state.active then
     vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
-    return
+    return false
   end
   if active_pattern_count() >= config.max_patterns then
     vim.notify('FuzzLogg: max patterns reached (' .. config.max_patterns .. ')', vim.log.levels.WARN)
-    return
+    return false
   end
 
-  local ok, re = pcall(vim.regex, pattern)
-  if not ok then
-    vim.notify('FuzzLogg: invalid pattern: ' .. pattern, vim.log.levels.ERROR)
-    return
+  local re = matcher
+  if not re then
+    local ok
+    ok, re = pcall(vim.regex, pattern)
+    if not ok then
+      vim.notify('FuzzLogg: invalid pattern: ' .. pattern, vim.log.levels.ERROR)
+      return false
+    end
   end
 
   local idx = active_pattern_count() + 1
-  local color = config.colors[((idx - 1) % #config.colors) + 1]
-  local hl_group = 'FuzzLoggPat' .. idx
+  local used = {}
+  for _, active in ipairs(all_patterns()) do used[active.hl_group] = true end
+  local slot
+  for i = 1, #config.colors do
+    if not used['FuzzLoggPat' .. i] then
+      slot = i
+      break
+    end
+  end
+  slot = slot or (((idx - 1) % #config.colors) + 1)
+  local color = config.colors[slot]
+  local hl_group = 'FuzzLoggPat' .. slot
   local ns_id = vim.api.nvim_create_namespace('')
 
   vim.api.nvim_set_hl(0, hl_group, { fg = color, bold = true })
@@ -304,15 +320,19 @@ local function add_pattern(pattern, inclusive)
     ns_id = ns_id,
     hl_group = hl_group,
     color = color,
+    transient = transient,
+    key = matcher and {} or nil,
   })
 
-  store.add_pattern(pattern)
+  if not transient then store.add_pattern(pattern) end
 
-  local kind = inclusive and 'include' or 'exclude'
-  vim.notify(string.format('FuzzLogg: pattern %d [%s] %s', idx, kind, pattern), vim.log.levels.INFO)
-
-  schedule_render()
-  auto_save()
+  if not defer_update then
+    local kind = inclusive and 'include' or 'exclude'
+    vim.notify(string.format('FuzzLogg: pattern %d [%s] %s', idx, kind, pattern), vim.log.levels.INFO)
+    schedule_render()
+    if not transient then auto_save() end
+  end
+  return true
 end
 
 local function make_base(tree, expr, regex_cache)
@@ -346,6 +366,21 @@ local function clear_highlights(patterns)
   end
 end
 
+local function active_pattern_labels()
+  local lines = {}
+  local index = 1
+  if state.base then
+    table.insert(lines, string.format('[1] = expression %s', state.base.expr))
+    index = 2
+  end
+  for i, p in ipairs(state.patterns) do
+    local kind = p.inclusive and '+' or '-'
+    local scope = p.transient and ' [group]' or ''
+    table.insert(lines, string.format('[%d] %s %s  (%s)%s', index + i - 1, kind, p.pattern, p.color, scope))
+  end
+  return lines
+end
+
 function M.fuzzlogg_open()
   if state.active then
     vim.notify('FuzzLogg: already active, close first with fuzzlogg_close()', vim.log.levels.WARN)
@@ -362,12 +397,21 @@ function M.fuzzlogg_open()
   vim.notify('FuzzLogg: opened. Add patterns with fuzzlogg_add()', vim.log.levels.INFO)
 end
 
-function M.fuzzlogg_add(inclusive)
+function M.fuzzlogg_add(inclusive, pattern)
   if not state.active then
     vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
     return
   end
   inclusive = (inclusive ~= false)
+  if pattern ~= nil then
+    add_pattern(pattern, inclusive)
+    return
+  end
+
+  local function submit_pattern(pattern)
+    if not pattern or pattern == '' then return end
+    vim.schedule(function() add_pattern(pattern, inclusive) end)
+  end
 
   local history = store.get_patterns()
   require('fzf-lua').fzf_exec(history, {
@@ -379,11 +423,38 @@ function M.fuzzlogg_add(inclusive)
         if not pattern or pattern == '' then
           pattern = opts and opts.last_query
         end
-        if not pattern or pattern == '' then return end
-        vim.schedule(function() add_pattern(pattern, inclusive) end)
+        submit_pattern(pattern)
       end,
+      ['alt-enter'] = {
+        fn = function(_, opts) submit_pattern(opts and opts.last_query) end,
+        header = 'add typed pattern',
+      },
     },
   })
+end
+
+function M.fuzzlogg_add_group(group, pattern)
+  if not state.active then
+    vim.notify('FuzzLogg: not active, open first with fuzzlogg_open()', vim.log.levels.WARN)
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(state.src_bufnr, 0, -1, false)
+  local available = config.max_patterns - active_pattern_count()
+  local patterns, err = require('fzf-foldsearch.group_patterns').expand(pattern, group, lines, available)
+  if not patterns then
+    vim.notify('FuzzLogg: ' .. err, vim.log.levels.ERROR)
+    return
+  end
+  if #patterns == 0 then
+    vim.notify('FuzzLogg: no non-empty group values found', vim.log.levels.WARN)
+    return
+  end
+  for _, derived in ipairs(patterns) do
+    add_pattern(derived.label, true, true, true, derived.matcher)
+  end
+  store.add_pattern(pattern)
+  schedule_render()
+  vim.notify('FuzzLogg: added ' .. #patterns .. ' patterns from group ' .. group, vim.log.levels.INFO)
 end
 
 function M.fuzzlogg_save(name, on_saved)
@@ -391,8 +462,9 @@ function M.fuzzlogg_save(name, on_saved)
     vim.notify('FuzzLogg: not active', vim.log.levels.WARN)
     return
   end
-  if #state.patterns == 0 and not state.base then
-    vim.notify('FuzzLogg: no patterns to save', vim.log.levels.WARN)
+  local expr = build_expr()
+  if not expr then
+    vim.notify('FuzzLogg: no persistent patterns to save', vim.log.levels.WARN)
     return
   end
 
@@ -405,9 +477,16 @@ function M.fuzzlogg_save(name, on_saved)
     return
   end
 
-  local expr = build_expr()
   store.save_composition(name, expr)
-  vim.notify('FuzzLogg: saved composition "' .. name .. '"', vim.log.levels.INFO)
+  local omitted_groups = false
+  for _, p in ipairs(state.patterns) do
+    if p.transient then
+      omitted_groups = true
+      break
+    end
+  end
+  local suffix = omitted_groups and ' (group patterns omitted)' or ''
+  vim.notify('FuzzLogg: saved composition "' .. name .. '"' .. suffix, vim.log.levels.INFO)
   if on_saved then on_saved() end
 end
 
@@ -480,42 +559,72 @@ function M.fuzzlogg_load_pattern(pattern)
   load_tree({ type = 'pattern', value = pattern })
 end
 
+local function remove_pattern_indices(indices)
+  local offset = state.base and 1 or 0
+  local persistent_removed = false
+  for i = #state.patterns, 1, -1 do
+    if indices[i + offset] then
+      if not state.patterns[i].transient then persistent_removed = true end
+      clear_highlights({ state.patterns[i] })
+      table.remove(state.patterns, i)
+    end
+  end
+  if state.base and indices[1] then
+    clear_highlights(state.base.patterns)
+    state.base = nil
+    persistent_removed = true
+  end
+  schedule_render()
+  if persistent_removed then auto_save() end
+end
+
 function M.fuzzlogg_remove(idx)
   if not state.active then return end
+  local labels = active_pattern_labels()
+  if idx == nil then
+    if #labels == 0 then
+      vim.notify('FuzzLogg: no active patterns', vim.log.levels.INFO)
+      return
+    end
+    require('fzf-lua').fzf_exec(labels, {
+      prompt = 'FuzzLogg remove> ',
+      fzf_opts = { ['--multi'] = true, ['--header'] = 'Tab: select patterns; Enter: remove' },
+      actions = {
+        ['enter'] = function(selected)
+          if not selected or #selected == 0 then return end
+          local indices = {}
+          for _, label in ipairs(selected) do
+            local index = tonumber(label:match('^%[(%d+)%]'))
+            if index then indices[index] = true end
+          end
+          if not next(indices) then return end
+          vim.schedule(function()
+            if state.active then remove_pattern_indices(indices) end
+          end)
+        end,
+      },
+    })
+    return
+  end
   if type(idx) ~= 'number' or idx < 1 or idx % 1 ~= 0 then
     vim.notify('FuzzLogg: invalid pattern index ' .. tostring(idx), vim.log.levels.WARN)
     return
   end
-  if state.base then
-    if idx == 1 then
-      clear_highlights(state.base.patterns)
-      state.base = nil
-      schedule_render()
-      auto_save()
-      return
-    end
-    idx = idx - 1
-  end
-  local p = state.patterns[idx]
-  if not p then
+  if idx > #labels then
     vim.notify('FuzzLogg: no pattern at index ' .. tostring(idx), vim.log.levels.WARN)
     return
   end
-
-  clear_highlights({ p })
-  table.remove(state.patterns, idx)
-
-  schedule_render()
-  auto_save()
+  remove_pattern_indices({ [idx] = true })
 end
 
 function M.fuzzlogg_clear()
   if not state.active then return end
+  local had_persistent = build_expr() ~= nil
   clear_highlights(all_patterns())
   state.base = nil
   state.patterns = {}
   schedule_render()
-  auto_save()
+  if had_persistent then auto_save() end
 end
 
 function M.fuzzlogg_close()
@@ -554,17 +663,7 @@ function M.fuzzlogg_list()
     vim.notify('FuzzLogg: no active patterns', vim.log.levels.INFO)
     return
   end
-  local lines = {}
-  local index = 1
-  if state.base then
-    table.insert(lines, string.format('[1] = expression %s', state.base.expr))
-    index = 2
-  end
-  for i, p in ipairs(state.patterns) do
-    local kind = p.inclusive and '+' or '-'
-    table.insert(lines, string.format('[%d] %s %s  (%s)', index + i - 1, kind, p.pattern, p.color))
-  end
-  vim.notify('FuzzLogg patterns:\n' .. table.concat(lines, '\n'), vim.log.levels.INFO)
+  vim.notify('FuzzLogg patterns:\n' .. table.concat(active_pattern_labels(), '\n'), vim.log.levels.INFO)
 end
 
 function M.fuzzlogg_jump_to_source()

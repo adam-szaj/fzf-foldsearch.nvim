@@ -156,13 +156,13 @@ A new panel opens to the right (vsplit by default). It's empty — no patterns y
 
 Press `,va` (or `:FuzzLoggAdd include`).
 
-A picker opens showing your pattern history (empty on first use). Type `ERROR` and press `<Enter>`.
+A picker opens showing your pattern history (empty on first use). Type `ERROR` and press `<Alt-Enter>`.
 
 The results panel now shows all lines containing `ERROR`, highlighted in color 1 (blue).
 
 **Step 3 — Add a second pattern**
 
-Press `,va` again. Type `WARN` and press `<Enter>`.
+Press `,va` again. Type `WARN` and press `<Alt-Enter>`.
 
 Lines matching `WARN` appear in the results panel highlighted in color 2 (cyan). Both patterns are active simultaneously.
 
@@ -172,7 +172,7 @@ Include patterns combine with OR. If a line matches multiple includes, the first
 
 There's a module called `heartbeat` that logs every second and drowns out real errors.
 
-Press `,vx` (or `:FuzzLoggAdd exclude`). Type `heartbeat` and press `<Enter>`.
+Press `,vx` (or `:FuzzLoggAdd exclude`). Type `heartbeat` and press `<Alt-Enter>`.
 
 Lines containing `heartbeat` disappear from the results — even if they also matched a previous pattern.
 
@@ -213,12 +213,35 @@ FuzzLogg include>
 The list shows your pattern history — patterns you've used before, most recent first. You can:
 
 - **Select a historical pattern** — move the cursor to it and press `<Enter>`
-- **Type a new pattern** — just start typing; press `<Enter>` to use what you typed
+- **Type a new pattern** — start typing and press `<Alt-Enter>` to use exactly what
+  you typed, even if history matches
 - **Filter the history** — type to narrow down the list, then `<Enter>` to select the highlighted item
 
-Pressing `<Enter>` uses the highlighted history entry when one is selected. If no entry is selected, it uses the text in the query as a new pattern.
+Pressing `<Enter>` uses the highlighted history entry when one is selected. If
+no entry is selected, it uses the text in the query as a new pattern.
+`<Alt-Enter>` always uses the query.
 
 The picker is pre-filled with your last `/` search register.
+To add a pattern without opening the picker, use `:FuzzLoggAdd ERROR` or
+`:FuzzLoggAdd exclude heartbeat`. Bare `:FuzzLoggAdd`, `include`, and `exclude`
+still open the picker.
+
+### Patterns from a capture group
+
+Use `:FuzzLoggAddGroup {number} {Vim regex}` to scan the source buffer and add
+one colored include pattern for each distinct, non-empty value of that group.
+For log lines starting with `[main]`, `[mod1]`, and so on:
+
+```vim
+:FuzzLoggAddGroup 1 \v^\[(\S+)\s*\]
+```
+
+This acts like patterns `^\[main\s*\]`, `^\[mod1\s*\]`, etc. Each captured
+name is matched exactly while the source regex still controls the surrounding
+text. Group numbers are 1–9. If the values exceed the configured
+`max_patterns` limit, nothing is added. Only the source regex enters pattern
+history. Group patterns come only from the current buffer, belong to this
+session, and are omitted from saved compositions.
 
 ### Managing active patterns
 
@@ -227,7 +250,8 @@ The picker is pre-filled with your last `/` search register.
 ,vc   — clear all patterns
 ```
 
-To remove a specific pattern by index:
+Run `:FuzzLoggRemove` to pick active patterns. Press `<Tab>` to mark several
+and `<Enter>` to remove them together. To remove one by index:
 
 ```
 :FuzzLoggRemove 2     — remove pattern #2
@@ -376,8 +400,9 @@ These `<leader>v…` mappings are examples only; the plugin registers the comman
 | Command | Description |
 |---------|-------------|
 | `:FuzzLoggOpen` | Open FuzzLogg for current buffer |
-| `:FuzzLoggAdd [include\|exclude]` | Add pattern via picker |
-| `:FuzzLoggRemove {n}` | Remove pattern at index n |
+| `:FuzzLoggAdd [include\|exclude] [pattern]` | Pick or directly add a pattern |
+| `:FuzzLoggAddGroup {n} {regex}` | Add a pattern per distinct capture value |
+| `:FuzzLoggRemove [n]` | Pick active patterns or remove index n |
 | `:FuzzLoggClear` | Remove all patterns |
 | `:FuzzLoggClose` | Close FuzzLogg |
 | `:FuzzLoggContextAdd {n}` | Adjust context lines (can be negative) |

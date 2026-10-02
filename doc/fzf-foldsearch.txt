@@ -138,15 +138,31 @@ plugin does not register them. Define them in your Neovim configuration.
     controlled by `fuzzlogg.layout` in |fuzzlogg-config|).
 
                                                                *:FuzzLoggAdd*
-:FuzzLoggAdd [include|exclude]
-    Open fzf picker showing pattern history. Type a new pattern or select one
-    from history. With `exclude` the pattern hides matching lines instead of
-    showing them. Default is `include`.
+:FuzzLoggAdd [include|exclude] [pattern]
+    Without {pattern}, open fzf picker showing pattern history. Type a new
+    pattern or select one from history. Press `<Enter>` to select the
+    highlighted history entry, or `<Alt-Enter>` to add the typed pattern even
+    when history matches. With {pattern}, add it directly without a picker.
+    `exclude` hides matching lines instead of showing them; default is
+    `include`. For example, `:FuzzLoggAdd exclude heartbeat`.
+
+                                                          *:FuzzLoggAddGroup*
+:FuzzLoggAddGroup {n} {regex}
+    Scan the source buffer with a Vim {regex} and add one include pattern per
+    distinct, non-empty value of capture group {n} (1–9). Each captured value
+    is matched exactly while {regex} controls the surrounding text. If the
+    patterns exceed `max_patterns`, nothing is added. Only {regex} enters
+    pattern history. Group patterns come only from the current buffer; they
+    are session-only and omitted from saved compositions. Example: >
+      :FuzzLoggAddGroup 1 \v^\[(\S+)\s*\]
+<
 
                                                             *:FuzzLoggRemove*
-:FuzzLoggRemove {n}
-    Remove the pattern at index {n} (1-based). See |:FuzzLoggList| for
-    indices.
+:FuzzLoggRemove [n]
+    Without {n}, open fzf picker of active patterns. Mark several with `<Tab>`
+    and press `<Enter>` to remove them together. With {n}, remove the pattern
+    at index {n} (1-based). See |:FuzzLoggList| for indices. A loaded
+    composition appears as one removable expression item.
 
                                                              *:FuzzLoggClear*
 :FuzzLoggClear
@@ -281,7 +297,7 @@ for anonymous compositions and grouped namespace entries.
 ------------------------------------------------------------------------------
 3.5 Persistence                                        *fuzzlogg-persistence*
 
-All patterns and compositions are saved to: >
+Pattern history and compositions are saved to: >
 
     {stdpath('data')}/fuzzlogg/store.json
 <
