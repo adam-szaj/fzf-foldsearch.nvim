@@ -53,6 +53,15 @@ The original fold state is saved before applying folds and restored by
       <Ctrl-o>  extract visible lines (matched + context) to a new buffer
 
     The picker is pre-filled with the last `/` search register.
+    The picker, folds, and extracted results use Vim regexes on the current
+    buffer, including unsaved changes and scratch buffers. Matching follows
+    'ignorecase' and 'smartcase' as for `/`. Explicit pattern flags
+    such as \c, \C, \v, and \V override these defaults.
+
+                                                          *:FzfFoldSearchExpr*
+:FzfFoldSearchExpr {pattern}
+    Apply folds directly using a Vim regex, with the same matching settings
+    as the picker.
 
                                                                 *:FzfFoldEnd*
 :FzfFoldEnd

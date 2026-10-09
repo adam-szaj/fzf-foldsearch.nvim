@@ -19,28 +19,58 @@ local state = {
   result_bufs = {},
 }
 
-local function vim_to_ere(pat)
-  local s = pat:gsub("^\\[vVmM]", "")
-  s = s:gsub("\\.", function(m)
-    local c = m:sub(2)
-    if c == "<" then
-      return "\\<"
-    elseif c == ">" then
-      return "\\>"
+local function pattern_flags(pattern)
+  local very_magic, explicit_case = false, false
+  local magic = true
+  local i = 1
+  while i <= #pattern do
+    local char = pattern:sub(i, i)
+    local atom = pattern:sub(i, i + 1)
+    if (char == "[" and magic) or (atom == "\\[" and not magic) then
+      i = i + (char == "[" and 1 or 2)
+      if pattern:sub(i, i) == "^" then
+        i = i + 1
+      end
+      if pattern:sub(i, i) == "]" then
+        i = i + 1
+      end
+      while i <= #pattern and pattern:sub(i, i) ~= "]" do
+        if pattern:sub(i, i) == "\\" then
+          i = i + 2
+        elseif pattern:sub(i, i + 1):match "^%[[:=%.]" then
+          local delimiter = pattern:sub(i + 1, i + 1) .. "]"
+          local ending = pattern:find(delimiter, i + 2, true)
+          i = ending and ending + 2 or #pattern + 1
+        else
+          i = i + 1
+        end
+      end
+      i = i + 1
+    elseif char == "\\" then
+      if atom == "\\v" or atom == "\\V" then
+        very_magic = atom == "\\v"
+        magic = very_magic
+      elseif atom == "\\m" or atom == "\\M" then
+        magic = atom == "\\m"
+      elseif atom == "\\c" or atom == "\\C" then
+        explicit_case = true
+      end
+      i = i + 2
+    else
+      i = i + 1
     end
-    if c:match("^[dDsSwW]$") then
-      return "\\" .. c
-    end
-    if c:match "[%(%)%[%]%{%}%+%?%|%^%$%.]" then
-      return c
-    end
-    return "\\" .. c
-  end)
-  return s
+  end
+  -- Like Vim's smartcase, skip regex operators rather than counting e.g. \S.
+  local text = very_magic and pattern:gsub("[_%%].", "") or pattern:gsub("\\[_%%]?.", "")
+  return explicit_case, text ~= vim.fn.tolower(text)
 end
 
-local function ere_to_vim(pat)
-  return "\\v" .. pat:gsub("\\b", "\\<")
+local function compile_regex(pattern)
+  local explicit_case, uppercase = pattern_flags(pattern)
+  local ignorecase = vim.o.ignorecase and not (vim.o.smartcase and uppercase)
+  -- Do not add \c alongside an explicit \C: Vim gives \c precedence.
+  local case_flag = explicit_case and "" or (ignorecase and "\\c" or "\\C")
+  return vim.regex(case_flag .. pattern)
 end
 
 local function disable_heavy_features(bufnr)
@@ -82,7 +112,7 @@ local function compute_matches(bufnr, pattern, context)
   local total = #lines
 
   local matched = {}
-  local ok, regex = pcall(vim.regex, pattern)
+  local ok, regex = pcall(compile_regex, pattern)
   if not ok then
     vim.notify("fzf-foldsearch: invalid Vim regex: " .. pattern, vim.log.levels.WARN)
     return lines, matched, {}
@@ -189,6 +219,10 @@ function M.extract_visible()
 end
 
 local function do_fold(bufnr, pattern)
+  if not pcall(compile_regex, pattern) then
+    vim.notify("fzf-foldsearch: invalid Vim regex: " .. pattern, vim.log.levels.WARN)
+    return
+  end
   state.pattern = pattern
   state.context = config.context
   state.bufnr = bufnr
@@ -208,6 +242,8 @@ end
 
 function M.fold_search()
   local bufnr = vim.api.nvim_get_current_buf()
+  local fzf = require "fzf-lua"
+  local entry_prefix = string.format("[%d]%sbuffer:", bufnr, require("fzf-lua.utils").nbsp)
 
   local function with_pattern(opts, fn)
     local pattern = opts.last_query
@@ -219,39 +255,37 @@ function M.fold_search()
     end)
   end
 
-  local last_search = ""
-  local init_query = ""
-  if config.sync_last_search then
-    last_search = vim.fn.getreg "/"
-    init_query = last_search ~= "" and vim_to_ere(last_search) or ""
-  end
-
-  local function pattern_from_query(pattern)
-    if pattern == init_query and init_query ~= "" then
-      return last_search
+  local function picker_lines(args)
+    local ok, regex = pcall(compile_regex, args[1] or "")
+    if not ok then
+      return {}
     end
-    return pattern
+    local result = {}
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+      local col = regex:match_str(line)
+      if col then
+        -- Buffer metadata lets the builtin previewer show unsaved/scratch buffers.
+        table.insert(result, string.format("%s%d:%d:%s", entry_prefix, i, col + 1, line))
+      end
+    end
+    return result
   end
 
-  local grep_fun = nil
-  if vim.bo.buftype == "nofile" then
-    grep_fun = require"fzf-lua".blines
-  else
-    grep_fun = require"fzf-lua".lgrep_curbuf
-  end
-
-  grep_fun {
-    regex = init_query,
+  fzf.fzf_live(picker_lines, {
+    query = config.sync_last_search and vim.fn.getreg "/" or "",
+    prompt = "FoldSearch> ",
+    exec_empty_query = true,
+    previewer = "builtin",
+    fzf_opts = { ["--delimiter"] = ":", ["--with-nth"] = "2.." },
     silent = true,
     actions = {
       ["enter"] = function(_, opts)
         with_pattern(opts, function(pattern)
-          do_fold(bufnr, pattern_from_query(pattern))
+          do_fold(bufnr, pattern)
         end)
       end,
       ["ctrl-x"] = function(_, opts)
         with_pattern(opts, function(pattern)
-          pattern = pattern_from_query(pattern)
           local lines, matched, _ = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
@@ -264,7 +298,6 @@ function M.fold_search()
       end,
       ["ctrl-o"] = function(_, opts)
         with_pattern(opts, function(pattern)
-          pattern = pattern_from_query(pattern)
           local lines, _, visible = compute_matches(bufnr, pattern, config.context)
           local result = {}
           for i, line in ipairs(lines) do
@@ -276,7 +309,7 @@ function M.fold_search()
         end)
       end,
     },
-  }
+  })
 end
 
 function M.fold_search_expr(pattern)
@@ -344,8 +377,5 @@ M.fuzzlogg_panel_close = panel.panel_close
 
 local importer = require "fzf-foldsearch.importer"
 M.fuzzlogg_import = importer.import
-
-M.vim_to_ere = vim_to_ere
-M.ere_to_vim = ere_to_vim
 
 return M

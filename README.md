@@ -77,7 +77,10 @@ Result buffers are scratch buffers — they won't ask you to save on quit.
 
 ### Using regex
 
-The pattern is a Vim regex. Some examples:
+The picker, folds, and extracted results all use Vim regexes on the current
+buffer, including unsaved changes and scratch buffers. Matching follows the
+same `ignorecase` and `smartcase` settings as `/`; explicit `\c`,
+`\C`, `\v`, `\V`, `\m`, and `\M` flags override the defaults. Some examples:
 
 ```
 ERROR               — literal string
@@ -114,6 +117,7 @@ Inside the picker:
 | Command | Description |
 |---------|-------------|
 | `:FzfFoldSearch` | Open pattern picker |
+| `:FzfFoldSearchExpr {pattern}` | Apply folds directly using a Vim regex |
 | `:FzfFoldEnd` | Restore original folds |
 | `:FzfFoldContextAdd {n}` | Adjust context by n lines (can be negative) |
 | `:FzfFoldExtractMatched` | Extract matched lines to new buffer |
